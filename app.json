@@ -8,9 +8,16 @@
     "scheme": "taskgridmobile",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.taskgrid.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "TaskGrid uses your camera for profile photos and Dojah identity verification.",
+        "NSMicrophoneUsageDescription": "TaskGrid may use your microphone during secure identity verification.",
+        "NSPhotoLibraryUsageDescription": "TaskGrid uses your photos only when you choose a profile picture."
+      }
     },
     "android": {
+      "package": "com.taskgrid.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#10233F",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -29,6 +36,8 @@
       [
         "expo-splash-screen",
         {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 180,
           "resizeMode": "contain",
           "backgroundColor": "#10233F",
           "dark": {
@@ -47,10 +56,38 @@
         "expo-image-picker",
         {
           "photosPermission": "TaskGrid uses your photos only when you choose a profile picture.",
-          "cameraPermission": "TaskGrid uses your camera only when you take a profile picture.",
-          "microphonePermission": false
+          "cameraPermission": "TaskGrid uses your camera for profile photos and Dojah identity verification.",
+          "microphonePermission": "TaskGrid may use your microphone during secure identity verification."
         }
-      ]
+      ],
+      "./plugins/withAndroidBuildMemory",
+      "dojah-kyc-sdk-react-expo",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0",
+            "kotlinVersion": "2.2.10"
+          },
+          "ios": {
+            "extraPods": [
+              {
+                "name": "Realm",
+                "version": "~> 10.52.2",
+                "modular_headers": true
+              },
+              {
+                "name": "DojahWidget",
+                "git": "https://github.com/dojah-inc/sdk-swift.git",
+                "branch": "pod-package"
+              }
+            ]
+          }
+        }
+      ],
+      "./plugins/withAndroidKotlinCompiler"
     ],
     "experiments": {
       "typedRoutes": true

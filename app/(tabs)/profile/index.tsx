@@ -44,7 +44,7 @@ export default function ProfileScreen() {
   const comingSoon = (name: string) =>
     Alert.alert(
       `${name} is coming next`,
-      'This screen is prepared in the design system but its backend endpoint is not part of the current authentication API.',
+      'This feature is being prepared and will be available soon.',
     );
 
   return (
@@ -128,12 +128,14 @@ export default function ProfileScreen() {
           subtitle="Update your account password securely"
           onPress={() => router.push('/(tabs)/profile/change-password')}
         />
-        <SettingsRow
-          icon="shield-checkmark-outline"
-          title="Identity verification"
-          subtitle="KYC status and submitted documents"
-          onPress={() => comingSoon('Identity verification')}
-        />
+        {user?.role === 'RUNNER' ? (
+          <SettingsRow
+            icon="shield-checkmark-outline"
+            title="Identity verification"
+            subtitle="Check, complete or appeal your KYC status"
+            onPress={() => router.push('/(tabs)/profile/kyc')}
+          />
+        ) : null}
       </AnimatedEntrance>
 
       <AnimatedEntrance delay={190} style={styles.section}>

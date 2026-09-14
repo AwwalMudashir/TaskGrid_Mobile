@@ -28,6 +28,15 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const SESSION_RESTORE_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Session restore timed out.')), timeoutMs);
+    promise.then(resolve, reject).finally(() => clearTimeout(timeout));
+  });
+}
+
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -36,12 +45,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
     let mounted = true;
     async function restoreSession() {
       try {
-        const tokens = await getSessionTokens();
+        const tokens = await withTimeout(getSessionTokens(), SESSION_RESTORE_TIMEOUT_MS);
         if (!tokens) return;
-        const currentUser = await authApi.me();
+        const currentUser = await withTimeout(authApi.me(), SESSION_RESTORE_TIMEOUT_MS);
         if (mounted) setUser(currentUser);
       } catch {
-        await clearSessionTokens();
+        try {
+          await withTimeout(clearSessionTokens(), SESSION_RESTORE_TIMEOUT_MS);
+        } catch {
+          // A storage failure must not keep the application on the splash screen.
+        }
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -80,13 +93,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
             updated = await profileApi.replacePicture(picture);
           } catch (cause) {
             setUser(updated);
-            if (cause instanceof Error) {
-              throw new ApiError(
-                `Your account details were saved, but the picture was not uploaded. ${cause.message}`,
-                cause instanceof ApiError ? cause.code : 0,
-              );
-            }
-            throw cause;
+            const validationMessage =
+              cause instanceof ApiError && cause.code >= 400 && cause.code < 500
+                ? ` ${cause.message}`
+                : ' Please choose the photo again and try once more.';
+            throw new ApiError(
+              `Your profile information was saved, but we couldn't update your photo.${validationMessage}`,
+              cause instanceof ApiError ? cause.code : 0,
+            );
           }
         }
         setUser(updated);

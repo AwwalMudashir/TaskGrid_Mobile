@@ -51,7 +51,7 @@ export default function SupportScreen() {
     if (!options?.phoneNumber)
       return Alert.alert(
         'Calling is not configured yet',
-        'Add SUPPORT_PHONE to the backend environment to enable this option.',
+        'Phone support is not available right now. You can still send us a message below.',
       );
     await Linking.openURL(`tel:${options.phoneNumber.replace(/\s/g, '')}`);
   }
