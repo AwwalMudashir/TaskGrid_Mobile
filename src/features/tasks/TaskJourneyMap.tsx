@@ -1,11 +1,32 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Camera, Map, Marker } from '@maplibre/maplibre-react-native';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { OPEN_STREET_MAP_STYLE } from '@/src/components/home/WorkerLocationMap';
 import { AppText } from '@/src/components/ui/AppText';
 import type { Coordinates } from '@/src/features/tasks/task-api';
 import { radius, spacing, useAppTheme } from '@/src/theme';
+
+function lastUpdateLabel(updatedAt: string | null, now: number) {
+  if (!updatedAt) return 'Waiting for the first journey update';
+  const updatedTime = new Date(updatedAt).getTime();
+  if (!Number.isFinite(updatedTime)) return 'Latest location time unavailable';
+  const elapsedMinutes = Math.max(0, Math.floor((now - updatedTime) / 60_000));
+  if (elapsedMinutes < 1) return 'Location updated just now';
+  if (elapsedMinutes < 60)
+    return `Location updated ${elapsedMinutes} ${elapsedMinutes === 1 ? 'minute' : 'minutes'} ago`;
+  if (elapsedMinutes < 24 * 60) {
+    const hours = Math.floor(elapsedMinutes / 60);
+    return `Location updated ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  }
+  return `Location updated ${new Date(updatedAt).toLocaleString('en-NG', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`;
+}
 
 export function TaskJourneyMap({
   taskLocation,
@@ -22,14 +43,22 @@ export function TaskJourneyMap({
 }) {
   const { colors } = useAppTheme();
   const centre = workerLocation ?? taskLocation;
+  const [now, setNow] = useState(Date.now());
+  const updateAge = updatedAt ? now - new Date(updatedAt).getTime() : null;
+  const updateIsStale = updateAge != null && Number.isFinite(updateAge) && updateAge > 120_000;
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <View style={styles.section}>
       <View>
         <AppText variant="subtitle">Task journey</AppText>
-        <AppText variant="caption" color={colors.textMuted}>
+        <AppText variant="caption" color={updateIsStale ? colors.warning : colors.textMuted}>
           {workerLocation
-            ? `Latest shared location${updatedAt ? ` · ${new Date(updatedAt).toLocaleTimeString('en-NG')}` : ''}`
+            ? lastUpdateLabel(updatedAt, now)
             : 'The worker location appears here only while sharing is on.'}
         </AppText>
       </View>

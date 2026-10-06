@@ -11,11 +11,15 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import 'react-native-reanimated';
 
+// Registers the journey task at bundle scope so Android can run it without
+// mounting the React navigation tree.
+import '@/src/features/tasks/journey-location-task';
+
 import { AnimatedSplash } from '@/src/components/AnimatedSplash';
 import { AuthProvider, useAuth } from '@/src/features/auth/AuthContext';
 import { PushNotificationBridge } from '@/src/features/notifications/PushNotificationBridge';
 import { FirstRunFeatureTour } from '@/src/features/onboarding/FirstRunFeatureTour';
-import { ForegroundJourneyTracker } from '@/src/features/tasks/ForegroundJourneyTracker';
+import { JourneyLocationCoordinator } from '@/src/features/tasks/JourneyLocationCoordinator';
 import { TourTargetProvider } from '@/src/features/onboarding/TourTargetRegistry';
 import { AppThemeProvider, useAppTheme } from '@/src/theme';
 
@@ -98,7 +102,7 @@ function RootNavigator() {
         </Stack.Protected>
       </Stack>
       <PushNotificationBridge />
-      <ForegroundJourneyTracker />
+      <JourneyLocationCoordinator />
       <FirstRunFeatureTour />
     </>
   );

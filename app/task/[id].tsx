@@ -32,6 +32,11 @@ import { TaskAreaMap } from '@/src/features/tasks/TaskAreaMap';
 import { TaskJourneyMap } from '@/src/features/tasks/TaskJourneyMap';
 import { TaskPhotoPicker } from '@/src/features/tasks/TaskPhotoPicker';
 import {
+  requestJourneyLocationPermissions,
+  startJourneyLocationTracking,
+  stopJourneyLocationTracking,
+} from '@/src/features/tasks/journey-location-task';
+import {
   emergencyContactApi,
   taskApi,
   type Coordinates,
@@ -202,10 +207,12 @@ export default function TaskDetailScreen() {
   const [reviewClock, setReviewClock] = useState(Date.now());
   const busy = busyAction !== null;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!id) return;
-    setLoading(true);
-    setError('');
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const next = await taskApi.detail(id);
       setTask(next);
@@ -218,11 +225,13 @@ export default function TaskDetailScreen() {
       }
       return next;
     } catch (cause) {
-      setError(
-        cause instanceof ApiError ? cause.message : "We couldn't load this task. Try again.",
-      );
+      if (!silent) {
+        setError(
+          cause instanceof ApiError ? cause.message : "We couldn't load this task. Try again.",
+        );
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [id, user?.role]);
 
@@ -286,14 +295,14 @@ export default function TaskDetailScreen() {
 
   useEffect(() => {
     if (
-      !isOwner ||
+      (!isOwner && !isAssigned) ||
       !task?.locationSharingEnabled ||
       (task.status !== 'EN_ROUTE' && task.status !== 'ARRIVED')
     )
       return;
-    const timer = setInterval(() => void refresh(), 15_000);
+    const timer = setInterval(() => void refresh(true), 15_000);
     return () => clearInterval(timer);
-  }, [isOwner, refresh, task?.locationSharingEnabled, task?.status]);
+  }, [isAssigned, isOwner, refresh, task?.locationSharingEnabled, task?.status]);
 
   useEffect(() => {
     if (!task?.completionReviewDeadlineAt || task.status !== 'COMPLETED') return;
@@ -338,13 +347,28 @@ export default function TaskDetailScreen() {
     setError('');
     try {
       if (action === 'stop') {
-        await taskApi.stopSharing(task.id);
+        try {
+          await taskApi.stopSharing(task.id);
+        } finally {
+          await stopJourneyLocationTracking();
+        }
       } else {
+        if (action === 'start') await requestJourneyLocationPermissions();
         const coordinates = await currentCoordinates();
         if (action === 'start') {
           await taskApi.startJourney(task.id, coordinates);
+          try {
+            await startJourneyLocationTracking(task.id);
+          } catch {
+            await taskApi.stopSharing(task.id).catch(() => undefined);
+            await stopJourneyLocationTracking();
+            throw new Error("We couldn't keep journey sharing active. Check location access and try again.");
+          }
           setJourneyPromptVisible(false);
-        } else await taskApi.arrive(task.id, coordinates);
+        } else {
+          await taskApi.arrive(task.id, coordinates);
+          await stopJourneyLocationTracking();
+        }
       }
       await refresh();
     } catch (cause) {
@@ -369,6 +393,7 @@ export default function TaskDetailScreen() {
     setError('');
     try {
       await taskApi.arriveManually(task.id, manualArrivalReason);
+      await stopJourneyLocationTracking();
       setManualArrivalVisible(false);
       setManualArrivalReason('');
       await refresh();
@@ -765,13 +790,14 @@ export default function TaskDetailScreen() {
                     : 'The client has paid. Start your journey before leaving so TaskGrid can guide arrival check-in and keep the client updated.'}
                 </AppText>
                 <AppText variant="caption" color={colors.textMuted} style={styles.privacyCopy}>
-                  Your location updates only while TaskGrid is open. There is no continuous
-                  background tracking, and you can stop sharing at any time.
+                  With your permission, sharing continues if you lock your phone or briefly use
+                  another app. Android keeps a visible notification on screen. Sharing ends when
+                  you arrive, stop it, or the task ends.
                 </AppText>
                 <Button
                   label={journeyResumeRequired ? 'Resume sharing' : 'Start journey'}
                   icon="navigate-outline"
-                  onPress={() => void journeyAction('start')}
+                  onPress={() => setJourneyPromptVisible(true)}
                   loading={busyAction === 'journey-start'}
                 />
               </LinearGradient>
@@ -2009,7 +2035,7 @@ export default function TaskDetailScreen() {
       </Modal>
 
       <Modal
-        visible={journeyPromptVisible && journeyStartRequired}
+        visible={journeyPromptVisible && (journeyStartRequired || journeyResumeRequired)}
         transparent
         animationType="fade"
         statusBarTranslucent
@@ -2061,17 +2087,18 @@ export default function TaskDetailScreen() {
             </View>
 
             <AppText variant="eyebrow" color={colors.success}>
-              Payment confirmed
+              Journey location consent
             </AppText>
             <AppText variant="title" style={styles.journeyPromptTitle}>
               Start your journey before you leave
             </AppText>
             <AppText color={colors.textSecondary} style={styles.journeyPromptDescription}>
-              This starts the task journey and lets the client know you are on the way. Your
-              location is shared only while this task is active.
+              Your exact location will be shared with the accepted client during this journey,
+              including while TaskGrid is in the background. Android will show a permanent
+              journey notification. Sharing stops when you arrive, stop it, or the task ends.
             </AppText>
             <Button
-              label="Start journey"
+              label={journeyResumeRequired ? 'Allow and resume sharing' : 'Allow and start journey'}
               icon="navigate-outline"
               onPress={() => void journeyAction('start')}
               loading={busyAction === 'journey-start'}

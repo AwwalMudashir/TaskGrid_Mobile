@@ -1,4 +1,5 @@
 import { Client, type IMessage, type StompSubscription } from '@stomp/stompjs';
+import { AppState } from 'react-native';
 
 import { type ChatMessage } from '@/src/features/chat/chat-api';
 import { API_BASE_URL } from '@/src/lib/api';
@@ -28,6 +29,8 @@ export async function connectChatChannel(
 ): Promise<() => Promise<void>> {
   let active = true;
   let subscription: StompSubscription | null = null;
+  let foreground = AppState.currentState === 'active';
+  let lifecycle = Promise.resolve();
 
   const client = new Client({
     brokerURL: socketUrl,
@@ -58,15 +61,30 @@ export async function connectChatChannel(
       if (active) handlers.onStateChange?.('disconnected');
     },
     onWebSocketClose: () => {
-      if (active) handlers.onStateChange?.('disconnected');
+      if (active && foreground) handlers.onStateChange?.('disconnected');
     },
   });
 
   handlers.onStateChange?.('connecting');
-  client.activate();
+  if (foreground) client.activate();
+  const appStateSubscription = AppState.addEventListener('change', (state) => {
+    foreground = state === 'active';
+    lifecycle = lifecycle.then(async () => {
+      if (!active) return;
+      if (foreground) {
+        if (!client.active) client.activate();
+      } else if (client.active) {
+        subscription?.unsubscribe();
+        subscription = null;
+        await client.deactivate();
+      }
+    });
+  });
 
   return async () => {
     active = false;
+    appStateSubscription.remove();
+    await lifecycle;
     subscription?.unsubscribe();
     await client.deactivate();
   };

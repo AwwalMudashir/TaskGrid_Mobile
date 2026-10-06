@@ -14,7 +14,8 @@
         "NSCameraUsageDescription": "TaskGrid uses your camera for profile photos and Dojah identity verification.",
         "NSMicrophoneUsageDescription": "TaskGrid may use your microphone during secure identity verification.",
         "NSPhotoLibraryUsageDescription": "TaskGrid uses your photos only when you choose a profile picture.",
-        "NSLocationWhenInUseUsageDescription": "TaskGrid uses your location while the app is open to show nearby tasks and, when you start a journey, share progress and verify arrival."
+        "NSLocationWhenInUseUsageDescription": "TaskGrid uses your location while the app is open to show nearby tasks and verify arrival.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "With your consent, TaskGrid shares location during an active task journey even when the app is in the background. Sharing ends when you arrive, stop it, or the task ends."
       }
     },
     "android": {
@@ -59,7 +60,12 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "TaskGrid uses your location while the app is open to show nearby tasks and, when you start a journey, share progress and verify arrival."
+          "locationWhenInUsePermission": "TaskGrid uses your location while the app is open to show nearby tasks and verify arrival.",
+          "locationAlwaysAndWhenInUsePermission": "With your consent, TaskGrid shares location during an active task journey even when the app is in the background. Sharing ends when you arrive, stop it, or the task ends.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "androidForegroundServiceIcon": "./assets/images/android-icon-monochrome.png"
         }
       ],
       [
