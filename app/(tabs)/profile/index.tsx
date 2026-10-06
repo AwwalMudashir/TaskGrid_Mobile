@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, Image, Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
 import { AppText } from '@/src/components/ui/AppText';
@@ -11,6 +11,10 @@ import { Screen } from '@/src/components/ui/Screen';
 import { SettingsRow } from '@/src/components/ui/SettingsRow';
 import { SurfaceCard } from '@/src/components/ui/SurfaceCard';
 import { useAuth } from '@/src/features/auth/AuthContext';
+import {
+  arePushNotificationsEnabled,
+  setPushNotificationsEnabled,
+} from '@/src/features/notifications/push-notifications';
 import { radius, shadows, spacing, useAppTheme } from '@/src/theme';
 
 export default function ProfileScreen() {
@@ -18,6 +22,8 @@ export default function ProfileScreen() {
   const { colors, isDark, setThemePreference } = useAppTheme();
   const { user, signOut, reloadProfile } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [savingNotifications, setSavingNotifications] = useState(false);
   const role =
     user?.role === 'RUNNER' ? 'Worker' : user?.role === 'CLIENT' ? 'Client' : 'Administrator';
   const initial = user?.fullName.charAt(0).toUpperCase() || '?';
@@ -41,11 +47,44 @@ export default function ProfileScreen() {
     );
   }
 
-  const comingSoon = (name: string) =>
-    Alert.alert(
-      `${name} is coming next`,
-      'This feature is being prepared and will be available soon.',
-    );
+  useEffect(() => {
+    void arePushNotificationsEnabled()
+      .then(setNotificationsEnabled)
+      .catch(() => undefined);
+  }, []);
+
+  async function updateNotifications(enabled: boolean) {
+    if (savingNotifications) return;
+    setSavingNotifications(true);
+    setNotificationsEnabled(enabled);
+    try {
+      const result = await setPushNotificationsEnabled(enabled);
+      setNotificationsEnabled(result.enabled);
+      if (!result.enabled && result.reason === 'permission-denied') {
+        Alert.alert(
+          'Notifications are blocked',
+          'Allow notifications in your phone settings, then turn this option on again.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            {
+              text: 'Open settings',
+              onPress: () => void Linking.openSettings(),
+            },
+          ],
+        );
+      } else if (!result.enabled && enabled) {
+        Alert.alert(
+          'Notifications could not be enabled',
+          'Check your connection and try again. Your other app features will continue to work.',
+        );
+      }
+    } catch {
+      setNotificationsEnabled(!enabled);
+      Alert.alert('Could not save this setting', 'Check your connection and try again.');
+    } finally {
+      setSavingNotifications(false);
+    }
+  }
 
   return (
     <Screen contentStyle={styles.screen}>
@@ -119,7 +158,7 @@ export default function ProfileScreen() {
         <SettingsRow
           icon="person-outline"
           title="Update account"
-          subtitle="Name, phone, skill and profile picture"
+          subtitle="Name, phone, skills and profile picture"
           onPress={() => router.push('/(tabs)/profile/personal-info')}
         />
         <SettingsRow
@@ -128,13 +167,29 @@ export default function ProfileScreen() {
           subtitle="Update your account password securely"
           onPress={() => router.push('/(tabs)/profile/change-password')}
         />
-        {user?.role === 'RUNNER' ? (
+        {user?.role === 'CLIENT' ? (
           <SettingsRow
-            icon="shield-checkmark-outline"
-            title="Identity verification"
-            subtitle="Check, complete or appeal your KYC status"
-            onPress={() => router.push('/(tabs)/profile/kyc')}
+            icon="star-outline"
+            title="My reviews"
+            subtitle="See your rating and feedback from workers"
+            onPress={() => router.push('/(tabs)/profile/reviews' as never)}
           />
+        ) : null}
+        {user?.role === 'RUNNER' ? (
+          <>
+            <SettingsRow
+              icon="shield-checkmark-outline"
+              title="Identity verification"
+              subtitle="Check, complete or appeal your KYC status"
+              onPress={() => router.push('/(tabs)/profile/kyc')}
+            />
+            <SettingsRow
+              icon="business-outline"
+              title="Payout bank"
+              subtitle="Add or change the account for future earnings"
+              onPress={() => router.push('/payout-account')}
+            />
+          </>
         ) : null}
       </AnimatedEntrance>
 
@@ -169,16 +224,10 @@ export default function ProfileScreen() {
           />
         </View>
         <SettingsRow
-          icon="notifications-outline"
-          title="Notifications"
-          subtitle="Choose what TaskGrid sends you"
-          onPress={() => comingSoon('Notifications')}
-        />
-        <SettingsRow
           icon="people-outline"
           title="Emergency contact"
-          subtitle="Review your trusted safety contact"
-          onPress={() => comingSoon('Emergency contacts')}
+          subtitle="Add or update your trusted safety contact"
+          onPress={() => router.push('/emergency-contact')}
         />
         <SettingsRow
           icon="help-circle-outline"
@@ -186,6 +235,28 @@ export default function ProfileScreen() {
           subtitle="Get help or report a problem"
           onPress={() => router.push('/(tabs)/profile/support')}
         />
+      </AnimatedEntrance>
+
+      <AnimatedEntrance delay={225}>
+        <SurfaceCard style={styles.notificationCard}>
+          <View style={styles.notificationTop}>
+            <View style={[styles.notificationMark, { backgroundColor: colors.primarySoft }]}>
+              <Ionicons name="notifications-outline" size={22} color={colors.primary} />
+            </View>
+            <Switch
+              accessibilityLabel="Receive push notifications"
+              disabled={savingNotifications}
+              value={notificationsEnabled}
+              onValueChange={(enabled) => void updateNotifications(enabled)}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+          <AppText variant="subtitle">Push notifications</AppText>
+          <AppText variant="caption" color={colors.textMuted}>
+            Task updates, arrivals, payments and withdrawals
+          </AppText>
+        </SurfaceCard>
       </AnimatedEntrance>
 
       <AnimatedEntrance delay={240} style={styles.logout}>
@@ -206,7 +277,11 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   screen: { gap: spacing.xl, paddingTop: spacing.lg },
-  topbar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  topbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   refresh: {
     width: 44,
     height: 44,
@@ -217,16 +292,27 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   avatarImage: { width: '100%', height: '100%' },
-  identityCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  identityCard: {
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.xl,
+  },
   avatar: {
-    width: 68,
-    height: 68,
-    borderRadius: radius.xl,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  identity: { flex: 1, gap: 3 },
-  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  identity: { alignItems: 'center', gap: 3 },
+  badges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -253,6 +339,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   themeCopy: { flex: 1, gap: 2 },
+  notificationCard: { gap: spacing.xs, padding: spacing.lg },
+  notificationTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  notificationMark: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   logout: { gap: spacing.md, paddingTop: spacing.sm },
   version: { textAlign: 'center' },
 });

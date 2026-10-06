@@ -10,6 +10,7 @@ export type User = {
   profilePictureUrl: string | null;
   primarySkillId: string | null;
   primarySkillName: string | null;
+  additionalSkills: WorkerSkill[];
   emailVerified: boolean;
   active: boolean;
 };
@@ -31,6 +32,7 @@ export type RegisterPayload = {
   phoneNumber: string;
   password: string;
   primarySkillId?: string;
+  additionalSkillIds?: string[];
   profilePictureUrl?: string;
   profilePicturePublicId?: string;
 };
@@ -38,6 +40,7 @@ export type RegisterPayload = {
 export type RegistrationDraft = RegisterPayload & {
   accountType: AccountType;
   primarySkillId: string;
+  additionalSkillIds: string[];
   confirmPassword: string;
   acceptedTerms: boolean;
 };
@@ -50,6 +53,11 @@ export type Skill = {
   iconName: string | null;
   displayOrder: number;
   active: boolean;
+};
+
+export type WorkerSkill = {
+  id: string;
+  name: string;
 };
 
 export type LocalProfileImage = {
@@ -68,6 +76,7 @@ export type UpdateProfilePayload = {
   fullName: string;
   phoneNumber: string;
   primarySkillId?: string;
+  additionalSkillIds?: string[];
 };
 
 export type WorkerSummary = {
@@ -75,8 +84,12 @@ export type WorkerSummary = {
   fullName: string;
   profilePictureUrl: string | null;
   primarySkillName: string | null;
+  skillNames: string[];
   averageRating: number | null;
+  reviewCount: number;
   totalJobs: number;
+  identityVerified: boolean;
+  completionRate: number | null;
 };
 
 export type TaskSummary = {

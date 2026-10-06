@@ -8,6 +8,7 @@ import {
 } from 'react';
 
 import type { LocalProfileImage, UpdateProfilePayload, User } from '@/src/features/auth/types';
+import { unregisterCurrentDeviceForPush } from '@/src/features/notifications/push-notifications';
 import { ApiError, authApi, profileApi } from '@/src/lib/api';
 import { clearSessionTokens, getSessionTokens, saveSessionTokens } from '@/src/lib/token-storage';
 
@@ -77,6 +78,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
       async signOut() {
         const tokens = await getSessionTokens();
         try {
+          try {
+            await unregisterCurrentDeviceForPush();
+          } catch {}
           if (tokens?.refreshToken) await authApi.logout(tokens.refreshToken);
         } finally {
           await clearSessionTokens();

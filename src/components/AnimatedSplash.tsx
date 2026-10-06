@@ -16,7 +16,7 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
   const artworkOffset = useRef(new Animated.Value(18)).current;
   const copyOpacity = useRef(new Animated.Value(0)).current;
   const copyOffset = useRef(new Animated.Value(16)).current;
-  const pulse = useRef(new Animated.Value(0)).current;
+  const artworkMotion = useRef(new Animated.Value(0)).current;
   const reduceMotion = useRef(false);
 
   useEffect(() => {
@@ -48,15 +48,15 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
 
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, {
+        Animated.timing(artworkMotion, {
           toValue: 1,
-          duration: 1100,
+          duration: 1800,
           easing: Easing.inOut(Easing.quad),
           useNativeDriver: true,
         }),
-        Animated.timing(pulse, {
+        Animated.timing(artworkMotion, {
           toValue: 0,
-          duration: 1100,
+          duration: 1800,
           easing: Easing.inOut(Easing.quad),
           useNativeDriver: true,
         }),
@@ -64,7 +64,7 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
     );
     loop.start();
     return () => loop.stop();
-  }, [artworkOffset, artworkScale, copyOffset, copyOpacity, pulse]);
+  }, [artworkMotion, artworkOffset, artworkScale, copyOffset, copyOpacity]);
 
   useEffect(() => {
     if (!ready) return;
@@ -83,8 +83,10 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
     return () => clearTimeout(timeout);
   }, [onFinish, opacity, ready]);
 
-  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.1] });
-  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.04] });
+  const floatingScale = artworkMotion.interpolate({ inputRange: [0, 1], outputRange: [1, 1.035] });
+  const floatingOffset = artworkMotion.interpolate({ inputRange: [0, 1], outputRange: [0, -6] });
+  const combinedScale = Animated.multiply(artworkScale, floatingScale);
+  const combinedOffset = Animated.add(artworkOffset, floatingOffset);
 
   return (
     <Animated.View style={[styles.root, { opacity }]}>
@@ -96,16 +98,13 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
         style={styles.gradient}
       >
         <View style={styles.center}>
-          <Animated.View
-            style={[styles.pulse, { opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]}
-          />
           <Animated.Image
             accessibilityIgnoresInvertColors
             resizeMode="contain"
             source={require('../../assets/images/auth/login-trust.png')}
             style={[
               styles.artwork,
-              { transform: [{ scale: artworkScale }, { translateY: artworkOffset }] },
+              { transform: [{ scale: combinedScale }, { translateY: combinedOffset }] },
             ]}
           />
           <Animated.View
@@ -142,13 +141,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxxl,
   },
   artwork: { width: 190, height: 206, zIndex: 2 },
-  pulse: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: '#5EEAD4',
-  },
   copy: { alignItems: 'center', marginTop: spacing.lg, gap: spacing.sm },
   tagline: { textAlign: 'center', maxWidth: 300 },
   footer: { alignItems: 'center', gap: spacing.md, paddingBottom: 46 },

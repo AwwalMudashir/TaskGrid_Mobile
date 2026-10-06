@@ -28,6 +28,7 @@ type ApiOptions = Omit<RequestInit, 'body'> & {
   body?: unknown;
   authenticated?: boolean;
   retryAfterRefresh?: boolean;
+  timeoutMs?: number;
 };
 
 const localApiUrl = Platform.select({
@@ -40,8 +41,7 @@ export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? localApiUrl;
 const API_REQUEST_TIMEOUT_MS = 10_000;
 const IMAGE_UPLOAD_TIMEOUT_MS = 60_000;
 
-const CONNECTION_ERROR_MESSAGE =
-  "We couldn't connect right now. Check your internet connection and try again.";
+const CONNECTION_ERROR_MESSAGE = "We couldn't connect right now. Please try again.";
 const TIMEOUT_ERROR_MESSAGE = 'This is taking longer than expected. Please try again in a moment.';
 const RESPONSE_ERROR_MESSAGE = "We couldn't complete that request. Please try again.";
 const PHOTO_UPLOAD_ERROR_MESSAGE =
@@ -193,22 +193,27 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
     body,
     authenticated = false,
     retryAfterRefresh = true,
+    timeoutMs = API_REQUEST_TIMEOUT_MS,
     headers,
     ...requestOptions
   } = options;
   const tokens = authenticated ? await getSessionTokens() : null;
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
-      ...requestOptions,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        ...headers,
-        ...(tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {}),
+    response = await fetchWithTimeout(
+      `${API_BASE_URL}${path}`,
+      {
+        ...requestOptions,
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...headers,
+          ...(tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {}),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+      timeoutMs,
+    );
   } catch (cause) {
     if (cause instanceof ApiError) throw cause;
     throw connectionError();
@@ -295,6 +300,25 @@ export const mediaApi = {
     return result.payload.data;
   },
 };
+
+export async function uploadAuthenticatedImage<T>(
+  path: string,
+  image: LocalProfileImage,
+  retry = true,
+): Promise<T> {
+  const tokens = await getSessionTokens();
+  const result = await uploadImageRequest<T>(path, 'POST', image, {
+    ...(tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {}),
+  });
+  if (result.status === 401 && retry && (await refreshAccessToken()))
+    return uploadAuthenticatedImage<T>(path, image, false);
+  if (!result.ok || !result.payload.isSuccess)
+    throw new ApiError(
+      result.payload.message || 'The image could not be uploaded.',
+      result.payload.code,
+    );
+  return result.payload.data;
+}
 
 async function sendProfileImage(image: LocalProfileImage, retry = true): Promise<User> {
   if (image.fileSize && image.fileSize > 5 * 1024 * 1024) {

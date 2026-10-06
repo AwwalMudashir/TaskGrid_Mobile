@@ -70,13 +70,17 @@ export default function HomeScreen() {
             </AppText>
             <AppText color="rgba(255,255,255,0.78)">
               {isWorker
-                ? 'Explore open work that matches your primary skill.'
+                ? 'Explore open work that matches the services you offer.'
                 : 'Create a clear task and connect with a trusted local worker.'}
             </AppText>
           </View>
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push('/(tabs)/tasks')}
+            onPress={() =>
+              router.push(
+                isWorker ? { pathname: '/(tabs)/tasks', params: { section: 'open' } } : '/task/new',
+              )
+            }
             style={({ pressed }) => [styles.heroButton, { opacity: pressed ? 0.86 : 1 }]}
           >
             <AppText variant="button" color="#24266C">
@@ -100,7 +104,7 @@ export default function HomeScreen() {
             detail={isWorker ? 'Manage and find work' : 'Post and manage requests'}
             color={colors.primary}
             background={colors.primarySoft}
-            onPress={() => router.push('/(tabs)/tasks')}
+            onPress={() => router.push({ pathname: '/(tabs)/tasks', params: { section: 'mine' } })}
           />
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
           <Action
@@ -111,15 +115,19 @@ export default function HomeScreen() {
             background={colors.successSoft}
             onPress={() => router.push('/(tabs)/messages')}
           />
-          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-          <Action
-            icon="wallet-outline"
-            label="Wallet"
-            detail="Payments and escrow"
-            color={colors.warning}
-            background={colors.warningSoft}
-            onPress={() => router.push('/(tabs)/wallet')}
-          />
+          {isWorker ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+              <Action
+                icon="wallet-outline"
+                label="Wallet"
+                detail="Earnings and withdrawals"
+                color={colors.warning}
+                background={colors.warningSoft}
+                onPress={() => router.push('/(tabs)/wallet')}
+              />
+            </>
+          ) : null}
         </SurfaceCard>
       </AnimatedEntrance>
       <AnimatedEntrance delay={165}>
@@ -130,21 +138,13 @@ export default function HomeScreen() {
           <WorkerLocationMap />
         </AnimatedEntrance>
       ) : null}
-      <AnimatedEntrance delay={190} style={styles.section}>
-        <AppText variant="subtitle">Account readiness</AppText>
-        {!user?.emailVerified ? (
+      {!user?.emailVerified ? (
+        <AnimatedEntrance delay={220}>
           <NoticeCard tone="warning" icon="mail-unread-outline" title="Verify your email">
             Complete email verification before using protected TaskGrid features.
           </NoticeCard>
-        ) : (
-          <NoticeCard tone="success" title="Email verified">
-            Your sign-in email has been confirmed.
-          </NoticeCard>
-        )}
-        <NoticeCard icon="shield-checkmark-outline" title="Safety before work">
-          Add an emergency contact from Profile before posting or accepting a task.
-        </NoticeCard>
-      </AnimatedEntrance>
+        </AnimatedEntrance>
+      ) : null}
     </Screen>
   );
 }

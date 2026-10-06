@@ -166,7 +166,7 @@ export default function KycScreen() {
     if (widgetResult === 'closed' || widgetResult === 'unknown') {
       setNotice(
         widgetResult === 'closed'
-          ? 'The Dojah window closed before a result was submitted. Your progress may still be saved; tap Continue verification to resume.'
+          ? 'The Dojah window closed before a result was submitted. Your progress may still be saved. Tap Continue verification to resume.'
           : 'Dojah closed without returning a verification result. Tap Continue verification to resume this attempt.',
       );
       return;

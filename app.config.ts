@@ -1,4 +1,6 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const plugins = [...(config.plugins ?? [])];
@@ -12,6 +14,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: config.name ?? 'TaskGrid',
     slug: config.slug ?? 'taskgrid-mobile',
+    android: {
+      ...config.android,
+      ...(existsSync(resolve(process.cwd(), 'google-services.json'))
+        ? { googleServicesFile: './google-services.json' }
+        : {}),
+    },
     plugins,
   };
 };

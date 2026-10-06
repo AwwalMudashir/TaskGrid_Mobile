@@ -15,12 +15,14 @@ import { NoticeCard } from '@/src/components/ui/NoticeCard';
 import { Screen } from '@/src/components/ui/Screen';
 import { StepProgress } from '@/src/components/ui/StepProgress';
 import { TextField } from '@/src/components/ui/TextField';
+import { AdditionalSkillPicker } from '@/src/features/auth/AdditionalSkillPicker';
 import type {
   AccountType,
   LocalProfileImage,
   RegistrationDraft,
   Skill,
 } from '@/src/features/auth/types';
+import { markFeatureTourPending } from '@/src/features/onboarding/feature-tour-storage';
 import { ApiError, authApi, mediaApi, skillsApi } from '@/src/lib/api';
 import { isEmail, isPhone, normaliseNigerianPhone, passwordError } from '@/src/lib/validation';
 import { radius, spacing, useAppTheme } from '@/src/theme';
@@ -28,6 +30,7 @@ import { radius, spacing, useAppTheme } from '@/src/theme';
 const initialDraft: RegistrationDraft = {
   accountType: 'CLIENT',
   primarySkillId: '',
+  additionalSkillIds: [],
   fullName: '',
   email: '',
   phoneNumber: '',
@@ -53,6 +56,7 @@ export default function RegisterScreen() {
   const [profileImage, setProfileImage] = useState<LocalProfileImage | null>(null);
   const [showPhotoMenu, setShowPhotoMenu] = useState(false);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
+  const [showAdditionalSkills, setShowAdditionalSkills] = useState(false);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
 
@@ -80,6 +84,7 @@ export default function RegisterScreen() {
     step > 0 ||
     draft.accountType !== initialDraft.accountType ||
     draft.primarySkillId.length > 0 ||
+    draft.additionalSkillIds.length > 0 ||
     profileImage !== null ||
     draft.fullName.trim().length > 0 ||
     draft.email.trim().length > 0 ||
@@ -129,12 +134,14 @@ export default function RegisterScreen() {
         phoneNumber: normaliseNigerianPhone(draft.phoneNumber),
         password: draft.password,
         primarySkillId: draft.accountType === 'WORKER' ? draft.primarySkillId : undefined,
+        additionalSkillIds: draft.accountType === 'WORKER' ? draft.additionalSkillIds : undefined,
         profilePictureUrl: uploadedImage?.url,
         profilePicturePublicId: uploadedImage?.publicId,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
       );
+      await markFeatureTourPending(draft.email).catch(() => undefined);
       router.replace({
         pathname: '/(auth)/check-email',
         params: { email: draft.email.trim().toLowerCase() },
@@ -155,6 +162,7 @@ export default function RegisterScreen() {
       ...current,
       accountType,
       primarySkillId: accountType === 'WORKER' ? current.primarySkillId : '',
+      additionalSkillIds: accountType === 'WORKER' ? current.additionalSkillIds : [],
     }));
     Haptics.selectionAsync().catch(() => undefined);
   }
@@ -274,7 +282,7 @@ export default function RegisterScreen() {
               </Pressable>
               <AppText variant="bodyMedium">Add a profile picture</AppText>
               <AppText variant="caption" color={colors.textMuted}>
-                Optional — you can add or change it later.
+                (Optional) You can add or change it later.
               </AppText>
             </View>
             <TextField
@@ -303,42 +311,55 @@ export default function RegisterScreen() {
               autoComplete="tel"
             />
             {draft.accountType === 'WORKER' ? (
-              <View style={styles.selectorBlock}>
-                <AppText variant="caption" color={colors.textSecondary}>
-                  Primary skill / category
-                </AppText>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Choose primary skill"
-                  onPress={() => !skillsLoading && setShowSkillMenu(true)}
-                  style={({ pressed }) => [
-                    styles.selector,
-                    {
-                      backgroundColor: colors.surface,
-                      borderColor: draft.primarySkillId ? colors.primary : colors.border,
-                      opacity: pressed ? 0.8 : 1,
-                    },
-                  ]}
-                >
-                  <View style={[styles.selectorIcon, { backgroundColor: colors.primarySoft }]}>
-                    <Ionicons
-                      name={
-                        (selectedSkill?.iconName as keyof typeof Ionicons.glyphMap) ??
-                        'construct-outline'
-                      }
-                      size={19}
-                      color={colors.primary}
-                    />
-                  </View>
-                  <AppText
-                    style={styles.selectorText}
-                    color={selectedSkill ? colors.text : colors.textMuted}
-                  >
-                    {skillsLoading ? 'Loading skills…' : (selectedSkill?.name ?? 'Select a skill')}
+              <>
+                <View style={styles.selectorBlock}>
+                  <AppText variant="caption" color={colors.textSecondary}>
+                    Primary skill / category
                   </AppText>
-                  <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
-                </Pressable>
-              </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose primary skill"
+                    onPress={() => !skillsLoading && setShowSkillMenu(true)}
+                    style={({ pressed }) => [
+                      styles.selector,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: draft.primarySkillId ? colors.primary : colors.border,
+                        opacity: pressed ? 0.8 : 1,
+                      },
+                    ]}
+                  >
+                    <View style={[styles.selectorIcon, { backgroundColor: colors.primarySoft }]}>
+                      <Ionicons
+                        name={
+                          (selectedSkill?.iconName as keyof typeof Ionicons.glyphMap) ??
+                          'construct-outline'
+                        }
+                        size={19}
+                        color={colors.primary}
+                      />
+                    </View>
+                    <AppText
+                      style={styles.selectorText}
+                      color={selectedSkill ? colors.text : colors.textMuted}
+                    >
+                      {skillsLoading
+                        ? 'Loading skills…'
+                        : (selectedSkill?.name ?? 'Select a skill')}
+                    </AppText>
+                    <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
+                  </Pressable>
+                </View>
+                <AdditionalSkillPicker
+                  visible={showAdditionalSkills}
+                  skills={skills}
+                  primarySkillId={draft.primarySkillId}
+                  selectedIds={draft.additionalSkillIds}
+                  onOpen={() => setShowAdditionalSkills(true)}
+                  onClose={() => setShowAdditionalSkills(false)}
+                  onChange={(ids) => update('additionalSkillIds', ids)}
+                />
+              </>
             ) : null}
           </View>
         ) : null}
@@ -361,9 +382,9 @@ export default function RegisterScreen() {
               secureTextEntry
               autoComplete="new-password"
             />
-            <NoticeCard icon="key-outline">
+            <AppText variant="caption" color={colors.textMuted} style={styles.fieldHint}>
               Use 8+ characters with uppercase, lowercase and a number.
-            </NoticeCard>
+            </AppText>
             <View style={styles.terms}>
               <Switch
                 value={draft.acceptedTerms}
@@ -448,6 +469,10 @@ export default function RegisterScreen() {
         onClose={() => setShowSkillMenu(false)}
         onSelect={(skill) => {
           update('primarySkillId', skill.id);
+          update(
+            'additionalSkillIds',
+            draft.additionalSkillIds.filter((id) => id !== skill.id),
+          );
           setShowSkillMenu(false);
           setError('');
         }}
@@ -642,6 +667,7 @@ const styles = StyleSheet.create({
   centerText: { textAlign: 'center' },
   options: { gap: spacing.sm },
   fields: { gap: spacing.lg },
+  fieldHint: { marginTop: -spacing.md, paddingHorizontal: spacing.xs },
   photoBlock: { alignItems: 'center', gap: 4, marginBottom: spacing.xs },
   photoButton: { width: 96, height: 96, marginBottom: spacing.sm },
   photoPlaceholder: {

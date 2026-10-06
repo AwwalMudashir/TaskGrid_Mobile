@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
 import { EmptyState } from '@/src/components/ui/EmptyState';
+import { RecommendedTaskSkeleton } from '@/src/components/ui/SkeletonLoader';
 import type { TaskSummary } from '@/src/features/auth/types';
 import { discoveryApi } from '@/src/lib/api';
 import { radius, spacing, useAppTheme } from '@/src/theme';
@@ -12,7 +13,8 @@ import { radius, spacing, useAppTheme } from '@/src/theme';
 const money = new Intl.NumberFormat('en-NG', {
   style: 'currency',
   currency: 'NGN',
-  maximumFractionDigits: 0,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 export function RecommendedTasks() {
@@ -34,7 +36,7 @@ export function RecommendedTasks() {
         </AppText>
       </View>
       {tasks === null ? (
-        <AppText color={colors.textMuted}>Finding open tasks…</AppText>
+        <RecommendedTaskSkeleton />
       ) : tasks.length === 0 ? (
         <EmptyState
           icon="sparkles-outline"
@@ -46,7 +48,7 @@ export function RecommendedTasks() {
           {tasks.map((task) => (
             <Pressable
               key={task.id}
-              onPress={() => router.push('/(tabs)/tasks')}
+              onPress={() => router.push({ pathname: '/task/[id]', params: { id: task.id } })}
               style={({ pressed }) => [
                 styles.card,
                 {

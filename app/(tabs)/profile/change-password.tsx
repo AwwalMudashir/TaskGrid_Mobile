@@ -114,9 +114,9 @@ export default function ChangePasswordScreen() {
               secureTextEntry
               autoComplete="new-password"
             />
-            <NoticeCard icon="key-outline">
+            <AppText variant="caption" color={colors.textMuted} style={styles.fieldHint}>
               Use at least 8 characters with uppercase, lowercase and a number.
-            </NoticeCard>
+            </AppText>
           </>
         ) : null}
 
@@ -142,4 +142,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   copy: { gap: spacing.sm },
+  fieldHint: { marginTop: -spacing.md, paddingHorizontal: spacing.xs },
 });

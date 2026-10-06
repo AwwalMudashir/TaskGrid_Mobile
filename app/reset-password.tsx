@@ -91,9 +91,9 @@ export default function ResetPasswordScreen() {
               secureTextEntry
               autoComplete="new-password"
             />
-            <NoticeCard icon="key-outline">
+            <AppText variant="caption" color={colors.textMuted} style={styles.fieldHint}>
               Use uppercase, lowercase and a number, with at least 8 characters.
-            </NoticeCard>
+            </AppText>
           </>
         ) : null}
         <Button
@@ -111,4 +111,5 @@ const styles = StyleSheet.create({
   body: { flex: 1, gap: spacing.xl, paddingTop: spacing.sm },
   copy: { gap: spacing.sm, alignItems: 'center' },
   centerText: { textAlign: 'center' },
+  fieldHint: { marginTop: -spacing.md, paddingHorizontal: spacing.xs },
 });

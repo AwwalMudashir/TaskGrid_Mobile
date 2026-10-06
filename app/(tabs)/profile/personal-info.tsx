@@ -9,6 +9,7 @@ import { Button } from '@/src/components/ui/Button';
 import { NoticeCard } from '@/src/components/ui/NoticeCard';
 import { Screen } from '@/src/components/ui/Screen';
 import { TextField } from '@/src/components/ui/TextField';
+import { AdditionalSkillPicker } from '@/src/features/auth/AdditionalSkillPicker';
 import type { LocalProfileImage, Skill } from '@/src/features/auth/types';
 import { useAuth } from '@/src/features/auth/AuthContext';
 import { ApiError, skillsApi } from '@/src/lib/api';
@@ -21,9 +22,13 @@ export default function PersonalInfoScreen() {
   const [fullName, setFullName] = useState(user?.fullName ?? '');
   const [phone, setPhone] = useState(user?.phoneNumber?.replace(/^\+234/, '') ?? '');
   const [skillId, setSkillId] = useState(user?.primarySkillId ?? '');
+  const [additionalSkillIds, setAdditionalSkillIds] = useState(
+    user?.additionalSkills?.map((skill) => skill.id) ?? [],
+  );
   const [skills, setSkills] = useState<Skill[]>([]);
   const [picture, setPicture] = useState<LocalProfileImage | null>(null);
   const [skillMenu, setSkillMenu] = useState(false);
+  const [additionalSkillMenu, setAdditionalSkillMenu] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const isWorker = user?.role === 'RUNNER';
@@ -81,7 +86,7 @@ export default function PersonalInfoScreen() {
   async function save() {
     const name = fullName.trim();
     if (name.length < 2) return setError('Enter your full name.');
-    if (!isPhone(phone)) return setError('Enter a valid Nigerian phone number.');
+    if (!isPhone(phone)) return setError('Enter a valid phone number.');
     if (isWorker && !skillId) return setError('Choose your primary skill.');
     if (picture?.fileSize && picture.fileSize > 5 * 1024 * 1024)
       return setError('That photo is larger than 5 MB. Choose a smaller image and try again.');
@@ -92,7 +97,7 @@ export default function PersonalInfoScreen() {
         {
           fullName: name,
           phoneNumber: normaliseNigerianPhone(phone),
-          ...(isWorker ? { primarySkillId: skillId } : {}),
+          ...(isWorker ? { primarySkillId: skillId, additionalSkillIds } : {}),
         },
         picture,
       );
@@ -195,19 +200,30 @@ export default function PersonalInfoScreen() {
         />
         <TextField label="Email address" value={user?.email ?? ''} editable={false} />
         {isWorker ? (
-          <View style={styles.field}>
-            <AppText variant="caption">Primary skill</AppText>
-            <Pressable
-              onPress={() => setSkillMenu(true)}
-              style={[
-                styles.select,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <AppText color={skillId ? colors.text : colors.textMuted}>{selectedSkill}</AppText>
-              <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
-            </Pressable>
-          </View>
+          <>
+            <View style={styles.field}>
+              <AppText variant="caption">Primary skill</AppText>
+              <Pressable
+                onPress={() => setSkillMenu(true)}
+                style={[
+                  styles.select,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <AppText color={skillId ? colors.text : colors.textMuted}>{selectedSkill}</AppText>
+                <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <AdditionalSkillPicker
+              visible={additionalSkillMenu}
+              skills={skills}
+              primarySkillId={skillId}
+              selectedIds={additionalSkillIds}
+              onOpen={() => setAdditionalSkillMenu(true)}
+              onClose={() => setAdditionalSkillMenu(false)}
+              onChange={setAdditionalSkillIds}
+            />
+          </>
         ) : null}
       </View>
       <NoticeCard icon="information-circle-outline">
@@ -234,6 +250,9 @@ export default function PersonalInfoScreen() {
                   key={skill.id}
                   onPress={() => {
                     setSkillId(skill.id);
+                    setAdditionalSkillIds((current) =>
+                      current.filter((additionalId) => additionalId !== skill.id),
+                    );
                     setSkillMenu(false);
                   }}
                   style={[styles.skillRow, { borderBottomColor: colors.divider }]}

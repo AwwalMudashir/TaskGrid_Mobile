@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "120386656992",
+    "project_id": "taskgrid-2c82e",
+    "storage_bucket": "taskgrid-2c82e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:120386656992:android:4661b552df1a5082f9ce85",
+        "android_client_info": {
+          "package_name": "com.taskgrid.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA5qRnwHFEu2mFL9Lnt73rXgaMR_wOsoEs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -15,7 +15,7 @@ import { radius, spacing, useAppTheme } from '@/src/theme';
 
 type Coordinates = { latitude: number; longitude: number };
 
-const OPEN_STREET_MAP_STYLE: StyleSpecification = {
+export const OPEN_STREET_MAP_STYLE: StyleSpecification = {
   version: 8,
   sources: {
     openStreetMap: {
@@ -143,7 +143,9 @@ export function WorkerLocationMap() {
               <Ionicons name={'location'} size={27} color={colors.primary} />
             </View>
             <AppText variant={'bodyMedium'}>
-              {mapUnavailable ? 'Map preview unavailable. Tap to retry.' : 'Show my current location'}
+              {mapUnavailable
+                ? 'Map preview unavailable. Tap to retry.'
+                : 'Show my current location'}
             </AppText>
           </Pressable>
         )}

@@ -13,6 +13,10 @@ import 'react-native-reanimated';
 
 import { AnimatedSplash } from '@/src/components/AnimatedSplash';
 import { AuthProvider, useAuth } from '@/src/features/auth/AuthContext';
+import { PushNotificationBridge } from '@/src/features/notifications/PushNotificationBridge';
+import { FirstRunFeatureTour } from '@/src/features/onboarding/FirstRunFeatureTour';
+import { ForegroundJourneyTracker } from '@/src/features/tasks/ForegroundJourneyTracker';
+import { TourTargetProvider } from '@/src/features/onboarding/TourTargetRegistry';
 import { AppThemeProvider, useAppTheme } from '@/src/theme';
 
 export { ErrorBoundary } from 'expo-router';
@@ -32,22 +36,28 @@ export default function RootLayout() {
     Manrope_600SemiBold,
     Manrope_700Bold,
   });
+  const [fontWaitTimedOut, setFontWaitTimedOut] = useState(false);
+  const startupReady = fontsLoaded || Boolean(fontError) || fontWaitTimedOut;
 
   useEffect(() => {
-    if (fontError) throw fontError;
-  }, [fontError]);
+    if (startupReady) return;
+    const timeout = setTimeout(() => setFontWaitTimedOut(true), 10_000);
+    return () => clearTimeout(timeout);
+  }, [startupReady]);
 
   useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync();
-  }, [fontsLoaded]);
+    if (startupReady) void SplashScreen.hideAsync();
+  }, [startupReady]);
 
-  if (!fontsLoaded) return null;
+  if (!startupReady) return null;
 
   return (
     <AppThemeProvider>
       <AuthProvider>
-        <RootNavigator />
-        <ThemedStatusBar />
+        <TourTargetProvider>
+          <RootNavigator />
+          <ThemedStatusBar />
+        </TourTargetProvider>
       </AuthProvider>
     </AppThemeProvider>
   );
@@ -68,16 +78,28 @@ function RootNavigator() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
-      <Stack.Protected guard={Boolean(user)}>
-        <Stack.Screen name="(tabs)" />
-      </Stack.Protected>
+    <>
+      <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
+        <Stack.Protected guard={Boolean(user)}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="payout-account" />
+          <Stack.Screen name="transaction-history" />
+          <Stack.Screen name="emergency-contact" />
+          <Stack.Screen name="task/new" />
+          <Stack.Screen name="task/[id]" />
+          <Stack.Screen name="task/[id]/chat" />
+          <Stack.Screen name="dispute/[taskId]" />
+        </Stack.Protected>
 
-      <Stack.Protected guard={!user}>
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="verify-email" />
-        <Stack.Screen name="reset-password" />
-      </Stack.Protected>
-    </Stack>
+        <Stack.Protected guard={!user}>
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="verify-email" />
+          <Stack.Screen name="reset-password" />
+        </Stack.Protected>
+      </Stack>
+      <PushNotificationBridge />
+      <ForegroundJourneyTracker />
+      <FirstRunFeatureTour />
+    </>
   );
 }
