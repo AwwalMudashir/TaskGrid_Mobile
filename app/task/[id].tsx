@@ -58,6 +58,7 @@ const label = (value: string) =>
     .replace(/_/g, ' ')
     .replace(/^./, (letter) => letter.toUpperCase());
 const isOpen = (task: TaskDetail) => task.status === 'POSTED' || task.status === 'BID_RECEIVED';
+const closedTaskStatuses = new Set(['PAID', 'REFUNDED', 'CANCELLED']);
 type BusyAction =
   | 'brief-upload'
   | 'apply'
@@ -182,11 +183,11 @@ export default function TaskDetailScreen() {
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [contactReady, setContactReady] = useState<boolean | null>(null);
   const [kycVerified, setKycVerified] = useState<boolean | null>(null);
+  const [readinessError, setReadinessError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [error, setError] = useState('');
   const [proposedPrice, setProposedPrice] = useState('');
-  const [eta, setEta] = useState('');
   const [message, setMessage] = useState('');
   const [selectedBid, setSelectedBid] = useState<TaskBid | null>(null);
   const [journeyPromptVisible, setJourneyPromptVisible] = useState(false);
@@ -207,33 +208,47 @@ export default function TaskDetailScreen() {
   const [reviewClock, setReviewClock] = useState(Date.now());
   const busy = busyAction !== null;
 
-  const refresh = useCallback(async (silent = false) => {
-    if (!id) return;
-    if (!silent) {
-      setLoading(true);
-      setError('');
-    }
+  const loadWorkerReadiness = useCallback(async () => {
+    setKycVerified(null);
+    setContactReady(null);
+    setReadinessError('');
     try {
-      const next = await taskApi.detail(id);
-      setTask(next);
-      if (user?.role === 'RUNNER' && isOpen(next)) {
-        setContactReady(null);
-        setKycVerified(null);
-        const [contact, kyc] = await Promise.all([emergencyContactApi.current(), kycApi.status()]);
-        setContactReady(Boolean(contact));
-        setKycVerified(kyc.status === 'VERIFIED');
-      }
-      return next;
-    } catch (cause) {
-      if (!silent) {
-        setError(
-          cause instanceof ApiError ? cause.message : "We couldn't load this task. Try again.",
-        );
-      }
-    } finally {
-      if (!silent) setLoading(false);
+      const [contact, kyc] = await Promise.all([emergencyContactApi.current(), kycApi.status()]);
+      setContactReady(Boolean(contact));
+      setKycVerified(kyc.status === 'VERIFIED');
+    } catch {
+      setReadinessError(
+        "We couldn't confirm your account readiness. This does not mean you are unverified.",
+      );
     }
-  }, [id, user?.role]);
+  }, []);
+
+  const refresh = useCallback(
+    async (silent = false) => {
+      if (!id) return;
+      if (!silent) {
+        setLoading(true);
+        setError('');
+      }
+      try {
+        const next = await taskApi.detail(id);
+        setTask(next);
+        if (user?.role === 'RUNNER' && isOpen(next)) {
+          void loadWorkerReadiness();
+        }
+        return next;
+      } catch (cause) {
+        if (!silent) {
+          setError(
+            cause instanceof ApiError ? cause.message : "We couldn't load this task. Try again.",
+          );
+        }
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [id, loadWorkerReadiness, user?.role],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -243,6 +258,13 @@ export default function TaskDetailScreen() {
 
   const isOwner = task?.clientId === user?.id;
   const isAssigned = task?.assignedRunnerId === user?.id;
+  const taskClosed = Boolean(task && closedTaskStatuses.has(task.status));
+  const canUseTaskConversation = Boolean(
+    (isOwner || isAssigned) && task?.assignedRunnerId && !taskClosed,
+  );
+  const canUseSos = Boolean(
+    (isOwner || isAssigned) && !taskClosed && task?.arrivedAt && task.status === 'ARRIVED',
+  );
   const myBid = task?.bids.find((bid) => bid.runnerId === user?.id);
   const validPrice = /^\d+(?:\.\d{1,2})?$/.test(proposedPrice.trim()) && Number(proposedPrice) > 0;
   const matchesBudget = Boolean(
@@ -250,7 +272,6 @@ export default function TaskDetailScreen() {
     proposedPrice.trim() &&
     Math.abs(Number(proposedPrice) - task.budget) < 0.005,
   );
-  const validEta = /^\d+$/.test(eta.trim()) && Number(eta) > 0 && Number(eta) <= 10080;
   const paymentCopy = task ? paymentWording(task, Boolean(isOwner), Boolean(isAssigned)) : null;
   const paymentSecured = Boolean(
     task?.paymentStatus && ['HELD', 'IN_PROGRESS'].includes(task.paymentStatus),
@@ -321,6 +342,12 @@ export default function TaskDetailScreen() {
   }, [id]);
 
   useEffect(() => {
+    if (canUseSos) return;
+    setSosVisible(false);
+    setSosNote('');
+  }, [canUseSos]);
+
+  useEffect(() => {
     if (journeyStartRequired && !journeyPromptDismissed) setJourneyPromptVisible(true);
     if (!journeyStartRequired) setJourneyPromptVisible(false);
   }, [journeyPromptDismissed, journeyStartRequired]);
@@ -328,7 +355,9 @@ export default function TaskDetailScreen() {
   async function currentCoordinates(): Promise<Coordinates> {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (!permission.granted) {
-      throw new Error('Allow location access to use journey check-in.');
+      throw new Error(
+        'Allow precise location so TaskGrid can calculate travel time and support journey check-in.',
+      );
     }
     const position = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.High,
@@ -356,13 +385,21 @@ export default function TaskDetailScreen() {
         if (action === 'start') await requestJourneyLocationPermissions();
         const coordinates = await currentCoordinates();
         if (action === 'start') {
-          await taskApi.startJourney(task.id, coordinates);
-          try {
-            await startJourneyLocationTracking(task.id);
-          } catch {
-            await taskApi.stopSharing(task.id).catch(() => undefined);
+          const journey = await taskApi.startJourney(task.id, coordinates);
+          if (journey.sharing && journey.taskStatus === 'EN_ROUTE') {
+            try {
+              await startJourneyLocationTracking(task.id);
+            } catch {
+              await taskApi.stopSharing(task.id).catch(() => undefined);
+              await stopJourneyLocationTracking();
+              throw new Error(
+                "We couldn't keep journey sharing active. Check location access and try again.",
+              );
+            }
+          } else {
+            // Starting from inside the arrival geofence checks the worker in
+            // immediately, so a background journey must not be registered.
             await stopJourneyLocationTracking();
-            throw new Error("We couldn't keep journey sharing active. Check location access and try again.");
           }
           setJourneyPromptVisible(false);
         } else {
@@ -471,11 +508,12 @@ export default function TaskDetailScreen() {
   }
 
   async function apply() {
-    if (!task || !validPrice || !validEta || busy) return;
+    if (!task || !validPrice || busy) return;
     setBusyAction('apply');
     setError('');
     try {
-      setTask(await taskApi.apply(task.id, Number(proposedPrice), Number(eta), message.trim()));
+      const coordinates = await currentCoordinates();
+      setTask(await taskApi.apply(task.id, Number(proposedPrice), coordinates, message.trim()));
     } catch (cause) {
       setError(
         cause instanceof ApiError ? cause.message : "We couldn't send your application. Try again.",
@@ -703,13 +741,18 @@ export default function TaskDetailScreen() {
               />
             </AnimatedEntrance>
           ) : null}
-          {taskLocation && (isOwner || isAssigned) && task.assignedRunnerId ? (
+          {taskLocation &&
+          (isOwner || isAssigned) &&
+          task.assignedRunnerId &&
+          task.status === 'EN_ROUTE' ? (
             <TaskJourneyMap
               taskLocation={taskLocation}
               workerLocation={
                 isAssigned ? (lastCoordinate ?? sharedWorkerLocation) : sharedWorkerLocation
               }
               updatedAt={task.runnerLocationUpdatedAt}
+              distanceToTaskMetres={task.runnerDistanceToTaskMetres}
+              estimatedTravelMinutes={task.runnerEstimatedTravelMinutes}
               onStopSharing={
                 isAssigned && task.locationSharingEnabled
                   ? () => void journeyAction('stop')
@@ -718,7 +761,7 @@ export default function TaskDetailScreen() {
               stopping={busyAction === 'journey-stop'}
             />
           ) : null}
-          {(isOwner || isAssigned) && task.assignedRunnerId ? (
+          {canUseTaskConversation ? (
             <AnimatedEntrance delay={45} style={styles.participantTools}>
               <Pressable
                 accessibilityRole="button"
@@ -745,24 +788,26 @@ export default function TaskDetailScreen() {
                 </View>
                 <Ionicons name="arrow-forward" size={21} color={colors.primary} />
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open emergency SOS"
-                onPress={() => setSosVisible(true)}
-                style={({ pressed }) => [
-                  styles.sosAction,
-                  {
-                    backgroundColor: colors.danger,
-                    opacity: pressed ? 0.75 : 1,
-                    transform: [{ scale: pressed ? 0.96 : 1 }],
-                  },
-                ]}
-              >
-                <Ionicons name="alert" size={22} color={colors.textOnPrimary} />
-                <AppText variant="caption" color={colors.textOnPrimary}>
-                  SOS
-                </AppText>
-              </Pressable>
+              {canUseSos ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open emergency SOS"
+                  onPress={() => setSosVisible(true)}
+                  style={({ pressed }) => [
+                    styles.sosAction,
+                    {
+                      backgroundColor: colors.danger,
+                      opacity: pressed ? 0.75 : 1,
+                      transform: [{ scale: pressed ? 0.96 : 1 }],
+                    },
+                  ]}
+                >
+                  <Ionicons name="alert" size={22} color={colors.textOnPrimary} />
+                  <AppText variant="caption" color={colors.textOnPrimary}>
+                    SOS
+                  </AppText>
+                </Pressable>
+              ) : null}
             </AnimatedEntrance>
           ) : null}
           {journeyStartRequired || journeyResumeRequired ? (
@@ -791,8 +836,8 @@ export default function TaskDetailScreen() {
                 </AppText>
                 <AppText variant="caption" color={colors.textMuted} style={styles.privacyCopy}>
                   With your permission, sharing continues if you lock your phone or briefly use
-                  another app. Android keeps a visible notification on screen. Sharing ends when
-                  you arrive, stop it, or the task ends.
+                  another app. Android keeps a visible notification on screen. Sharing ends when you
+                  arrive, stop it, or the task ends.
                 </AppText>
                 <Button
                   label={journeyResumeRequired ? 'Resume sharing' : 'Start journey'}
@@ -1368,6 +1413,16 @@ export default function TaskDetailScreen() {
                     .
                   </AppText>
                 </SurfaceCard>
+              ) : readinessError ? (
+                <SurfaceCard style={styles.notice}>
+                  <AppText variant="subtitle">Account status unavailable</AppText>
+                  <AppText color={colors.textSecondary}>{readinessError}</AppText>
+                  <Button
+                    label="Try again"
+                    variant="secondary"
+                    onPress={() => void loadWorkerReadiness()}
+                  />
+                </SurfaceCard>
               ) : kycVerified === null || contactReady === null ? (
                 <SurfaceCard style={styles.notice}>
                   <AppText color={colors.textSecondary}>
@@ -1422,13 +1477,10 @@ export default function TaskDetailScreen() {
                       ) : null
                     }
                   />
-                  <TextField
-                    label="How soon can you arrive? (minutes)"
-                    keyboardType="number-pad"
-                    placeholder="e.g. 60"
-                    value={eta}
-                    onChangeText={setEta}
-                  />
+                  <AppText variant="caption" color={colors.textMuted}>
+                    TaskGrid will use your current location to calculate an approximate travel time.
+                    The client sees the estimate, not your coordinates.
+                  </AppText>
                   <TextField
                     label="Short message (optional)"
                     placeholder="Why you're a good fit"
@@ -1440,7 +1492,7 @@ export default function TaskDetailScreen() {
                   <Button
                     label="Send application"
                     onPress={apply}
-                    disabled={!validPrice || !validEta}
+                    disabled={!validPrice}
                     loading={busyAction === 'apply'}
                   />
                 </SurfaceCard>
@@ -1466,7 +1518,8 @@ export default function TaskDetailScreen() {
           ) : null}
           {isAssigned &&
           task.paymentStatus === 'HELD' &&
-          ['EN_ROUTE', 'ARRIVED'].includes(task.status) ? (
+          task.status === 'ARRIVED' &&
+          task.arrivedAt ? (
             <SurfaceCard style={styles.form}>
               <AppText variant="subtitle">Submit completed work</AppText>
               <AppText color={colors.textSecondary}>
@@ -1658,20 +1711,15 @@ export default function TaskDetailScreen() {
 
               <View style={styles.editorialSection}>
                 <AppText variant="eyebrow" color={colors.primary}>
-                  Approximate location
+                  Travel estimate
                 </AppText>
-                {selectedBid?.approximateDistanceKm != null || selectedBid?.approximateLocation ? (
-                  <AppText color={colors.textSecondary}>
-                    {selectedBid.approximateLocation ?? 'Location shared'}
-                    {selectedBid.approximateDistanceKm != null
-                      ? ` · about ${selectedBid.approximateDistanceKm.toFixed(1)} km from this task`
-                      : ''}
-                  </AppText>
-                ) : (
-                  <AppText color={colors.textMuted}>
-                    This worker has not shared a recent discovery location.
-                  </AppText>
-                )}
+                <AppText color={colors.textSecondary}>
+                  {selectedBid?.etaMinutes != null
+                    ? `About ${selectedBid.etaMinutes} minutes from the task when this application was sent. `
+                    : 'A travel estimate is unavailable for this application. '}
+                  This is an approximate TaskGrid calculation, not a guaranteed arrival time. The
+                  worker's coordinates are not shared here.
+                </AppText>
               </View>
 
               {(selectedBid?.skills.length ?? 0) > 0 ? (
@@ -2094,8 +2142,8 @@ export default function TaskDetailScreen() {
             </AppText>
             <AppText color={colors.textSecondary} style={styles.journeyPromptDescription}>
               Your exact location will be shared with the accepted client during this journey,
-              including while TaskGrid is in the background. Android will show a permanent
-              journey notification. Sharing stops when you arrive, stop it, or the task ends.
+              including while TaskGrid is in the background. Android will show a permanent journey
+              notification. Sharing stops when you arrive, stop it, or the task ends.
             </AppText>
             <Button
               label={journeyResumeRequired ? 'Allow and resume sharing' : 'Allow and start journey'}

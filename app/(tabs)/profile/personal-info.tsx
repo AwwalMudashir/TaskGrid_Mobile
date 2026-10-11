@@ -10,8 +10,8 @@ import { NoticeCard } from '@/src/components/ui/NoticeCard';
 import { Screen } from '@/src/components/ui/Screen';
 import { TextField } from '@/src/components/ui/TextField';
 import { AdditionalSkillPicker } from '@/src/features/auth/AdditionalSkillPicker';
-import type { LocalProfileImage, Skill } from '@/src/features/auth/types';
 import { useAuth } from '@/src/features/auth/AuthContext';
+import type { LocalProfileImage, Skill } from '@/src/features/auth/types';
 import { ApiError, skillsApi } from '@/src/lib/api';
 import { isPhone, normaliseNigerianPhone } from '@/src/lib/validation';
 import { radius, spacing, useAppTheme } from '@/src/theme';
@@ -226,9 +226,9 @@ export default function PersonalInfoScreen() {
           </>
         ) : null}
       </View>
-      <NoticeCard icon="information-circle-outline">
+      {/* <NoticeCard icon="information-circle-outline">
         Email address and account type require separate protected flows and cannot be changed here.
-      </NoticeCard>
+      </NoticeCard> */}
       <Button label="Save changes" onPress={save} loading={loading} />
       <Modal
         visible={skillMenu}

@@ -92,6 +92,20 @@ export type WorkerSummary = {
   completionRate: number | null;
 };
 
+export type WorkerProfile = {
+  id: string;
+  fullName: string;
+  profilePictureUrl: string | null;
+  primarySkillName: string | null;
+  skillNames: string[];
+  identityStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED' | 'APPEALING' | 'SUSPENDED';
+  emailVerified: boolean;
+  active: boolean;
+  averageRating: number;
+  reviewCount: number;
+  completedJobs: number;
+};
+
 export type TaskSummary = {
   id: string;
   title: string;

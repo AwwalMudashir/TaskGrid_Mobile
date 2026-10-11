@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
 import {
@@ -13,19 +13,30 @@ import { radius, spacing, useAppTheme } from '@/src/theme';
 type WalletTransactionRowProps = {
   item: WalletTransaction;
   showDivider?: boolean;
+  onPress?: () => void;
 };
 
-export function WalletTransactionRow({ item, showDivider = false }: WalletTransactionRowProps) {
+export function WalletTransactionRow({
+  item,
+  showDivider = false,
+  onPress,
+}: WalletTransactionRowProps) {
   const { colors } = useAppTheme();
   const failed = item.status === 'FAILED';
-  const isReleasedEarning = item.type === 'ESCROW' && item.status === 'RELEASED';
+  const isReleasedEarning =
+    item.type === 'ESCROW' && ['RELEASED', 'PARTIALLY_RELEASED'].includes(item.status);
 
   return (
-    <View
-      style={[
+    <Pressable
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? `View ${transactionTitle(item)} details` : undefined}
+      disabled={!onPress}
+      onPress={onPress}
+      style={({ pressed }) => [
         styles.row,
         showDivider && { borderTopColor: colors.divider, borderTopWidth: 1 },
         item.failureReason && styles.detailedRow,
+        { opacity: pressed ? 0.65 : 1 },
       ]}
     >
       <View
@@ -48,7 +59,8 @@ export function WalletTransactionRow({ item, showDivider = false }: WalletTransa
       <View style={styles.copy}>
         <AppText variant="bodyMedium">{transactionTitle(item)}</AppText>
         <AppText variant="caption" color={failed ? colors.danger : colors.textMuted}>
-          {transactionStatus(item.status)} · {new Date(item.createdAt).toLocaleDateString('en-NG')}
+          {transactionStatus(item.status)} {'\u00B7'}{' '}
+          {new Date(item.createdAt).toLocaleDateString('en-NG')}
         </AppText>
         {failed && item.failureReason ? (
           <AppText variant="caption" color={colors.textMuted}>
@@ -61,10 +73,11 @@ export function WalletTransactionRow({ item, showDivider = false }: WalletTransa
         variant="bodyMedium"
         color={failed ? colors.danger : isReleasedEarning ? colors.success : colors.text}
       >
-        {item.type === 'WITHDRAWAL' && !failed ? '−' : isReleasedEarning ? '+' : ''}
+        {item.type === 'WITHDRAWAL' && !failed ? '\u2212' : isReleasedEarning ? '+' : ''}
         {formatMoney(item.amount, item.currency)}
       </AppText>
-    </View>
+      {onPress ? <Ionicons name="chevron-forward" size={17} color={colors.textMuted} /> : null}
+    </Pressable>
   );
 }
 

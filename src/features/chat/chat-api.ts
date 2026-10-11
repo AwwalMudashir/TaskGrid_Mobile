@@ -66,4 +66,10 @@ export const chatApi = {
       authenticated: true,
     });
   },
+  deleteForMe(taskId: string) {
+    return apiRequest<void>(`/chat/tasks/${taskId}`, {
+      method: 'DELETE',
+      authenticated: true,
+    });
+  },
 };

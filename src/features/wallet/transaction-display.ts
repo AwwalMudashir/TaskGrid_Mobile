@@ -1,10 +1,13 @@
 import type { WalletTransaction } from '@/src/features/wallet/wallet-api';
 
 export function formatMoney(amount: number, currency = 'NGN') {
-  return `${currency === 'NGN' ? '₦' : `${currency} `}${Number(amount).toLocaleString('en-NG', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return `${currency === 'NGN' ? '\u20A6' : `${currency} `}${Number(amount).toLocaleString(
+    'en-NG',
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    },
+  )}`;
 }
 
 export function transactionStatus(status: string) {
@@ -14,10 +17,12 @@ export function transactionStatus(status: string) {
     IN_PROGRESS: 'Task in progress',
     COMPLETED: 'Awaiting client confirmation',
     RELEASED: 'Successful',
+    PARTIALLY_RELEASED: 'Partially released',
     PROCESSING: 'Processing',
     FAILED: 'Failed',
     DISPUTED: 'Under review',
     REFUNDED: 'Refunded',
+    REFUND_PENDING: 'Refund processing',
     CANCELLED: 'Cancelled',
   };
   return labels[status] ?? status.toLowerCase().replace(/_/g, ' ');

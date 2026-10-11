@@ -10,6 +10,7 @@ import { Screen } from '@/src/components/ui/Screen';
 import { TransactionListSkeleton } from '@/src/components/ui/SkeletonLoader';
 import { SurfaceCard } from '@/src/components/ui/SurfaceCard';
 import { WalletTransactionRow } from '@/src/features/wallet/WalletTransactionRow';
+import { WalletTransactionDetailModal } from '@/src/features/wallet/WalletTransactionDetailModal';
 import { walletApi, type WalletTransaction } from '@/src/features/wallet/wallet-api';
 import { ApiError } from '@/src/lib/api';
 import { spacing, useAppTheme } from '@/src/theme';
@@ -77,6 +78,7 @@ export default function TransactionHistoryScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedTransaction, setSelectedTransaction] = useState<WalletTransaction | null>(null);
   const groups = useMemo(() => groupTransactions(transactions), [transactions]);
 
   const loadTransactions = useCallback(async () => {
@@ -142,12 +144,17 @@ export default function TransactionHistoryScreen() {
                     key={transaction.id}
                     item={transaction}
                     showDivider={index > 0}
+                    onPress={() => setSelectedTransaction(transaction)}
                   />
                 ))}
               </SurfaceCard>
             </View>
           ))
         : null}
+      <WalletTransactionDetailModal
+        item={selectedTransaction}
+        onClose={() => setSelectedTransaction(null)}
+      />
     </Screen>
   );
 }

@@ -1,10 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -31,6 +32,7 @@ const closedStatuses = new Set(['PAID', 'REFUNDED', 'CANCELLED']);
 
 export default function TaskChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const { user } = useAuth();
   const { colors } = useAppTheme();
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -45,6 +47,8 @@ export default function TaskChatScreen() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [socketState, setSocketState] = useState<ChatSocketState>('connecting');
+  const [deletePromptVisible, setDeletePromptVisible] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const participantName = useMemo(() => {
     if (!task) return 'Task conversation';
@@ -170,6 +174,22 @@ export default function TaskChatScreen() {
     }
   }
 
+  async function deleteConversation() {
+    if (!id || deleting) return;
+    setDeleting(true);
+    setError('');
+    try {
+      await chatApi.deleteForMe(id);
+      setDeletePromptVisible(false);
+      router.back();
+    } catch (cause) {
+      setDeletePromptVisible(false);
+      setError(cause instanceof ApiError ? cause.message : "We couldn't delete this conversation.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top']}>
       <KeyboardAvoidingView
@@ -177,7 +197,16 @@ export default function TaskChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.headerWrap}>
-          <AuthHeader title={participantName} subtitle={task?.title ?? 'Task conversation'} />
+          <AuthHeader
+            title={participantName}
+            subtitle={task?.title ?? 'Task conversation'}
+            rightAction={{
+              icon: 'trash-outline',
+              accessibilityLabel: 'Delete this conversation',
+              color: colors.danger,
+              onPress: () => setDeletePromptVisible(true),
+            }}
+          />
           {socketState !== 'connected' ? (
             <AppText variant="caption" color={colors.textMuted} style={styles.connectionText}>
               {socketState === 'connecting'
@@ -210,6 +239,11 @@ export default function TaskChatScreen() {
               <MessageBubble
                 message={item}
                 showSender={index === 0 || messages[index - 1]?.senderId !== item.senderId}
+                showDate={
+                  index === 0 ||
+                  new Date(messages[index - 1]!.createdAt).toDateString() !==
+                    new Date(item.createdAt).toDateString()
+                }
               />
             )}
             contentContainerStyle={styles.messageList}
@@ -307,48 +341,129 @@ export default function TaskChatScreen() {
             </Pressable>
           </View>
         )}
+
+        <Modal
+          visible={deletePromptVisible}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => !deleting && setDeletePromptVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              accessibilityLabel="Cancel deleting conversation"
+              onPress={() => !deleting && setDeletePromptVisible(false)}
+            />
+            <View style={[styles.deletePrompt, { backgroundColor: colors.surface }]}>
+              <View style={[styles.warningMark, { backgroundColor: colors.dangerSoft }]}>
+                <Ionicons name="trash-outline" size={27} color={colors.danger} />
+              </View>
+              <AppText variant="title" style={styles.promptTitle}>
+                Delete conversation?
+              </AppText>
+              <AppText color={colors.textSecondary} style={styles.promptCopy}>
+                Your existing messages with {participantName} will disappear from your inbox. The
+                other participant keeps their copy, and a future message can reopen the
+                conversation.
+              </AppText>
+              <View style={styles.promptActions}>
+                <View style={styles.promptButton}>
+                  <Button
+                    label="Keep conversation"
+                    variant="ghost"
+                    disabled={deleting}
+                    onPress={() => setDeletePromptVisible(false)}
+                  />
+                </View>
+                <View style={styles.promptButton}>
+                  <Button
+                    label="Delete"
+                    variant="danger"
+                    loading={deleting}
+                    onPress={() => void deleteConversation()}
+                  />
+                </View>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-function MessageBubble({ message, showSender }: { message: ChatMessage; showSender: boolean }) {
+function MessageBubble({
+  message,
+  showSender,
+  showDate,
+}: {
+  message: ChatMessage;
+  showSender: boolean;
+  showDate: boolean;
+}) {
   const { colors } = useAppTheme();
   return (
-    <View style={[styles.messageRow, message.mine && styles.mineRow]}>
-      <View
-        style={[
-          styles.bubble,
-          {
-            backgroundColor: message.mine ? colors.primary : colors.surface,
-            borderColor: message.mine ? colors.primary : colors.border,
-          },
-        ]}
-      >
-        {showSender && !message.mine ? (
-          <AppText variant="caption" color={colors.primary}>
-            {message.senderName}
-          </AppText>
-        ) : null}
-        <AppText color={message.mine ? colors.textOnPrimary : colors.text} style={styles.body}>
-          {message.content}
-        </AppText>
-        <View style={styles.meta}>
-          <AppText variant="caption" color={message.mine ? '#FFFFFFB8' : colors.textMuted}>
-            {new Date(message.createdAt).toLocaleTimeString('en-NG', {
-              hour: 'numeric',
-              minute: '2-digit',
-            })}
-          </AppText>
-          {message.mine ? (
-            <Ionicons
-              name={message.read ? 'checkmark-done' : 'checkmark'}
-              size={15}
-              color={message.read ? '#BAF5D1' : '#FFFFFFB8'}
-            />
+    <View style={styles.messageItem}>
+      {showDate ? <DateDivider value={message.createdAt} /> : null}
+      <View style={[styles.messageRow, message.mine && styles.mineRow]}>
+        <View
+          style={[
+            styles.bubble,
+            message.mine ? styles.mineBubble : styles.receivedBubble,
+            {
+              backgroundColor: message.mine ? colors.primary : colors.surfaceSecondary,
+            },
+          ]}
+        >
+          {showSender && !message.mine ? (
+            <AppText variant="caption" color={colors.primary}>
+              {message.senderName}
+            </AppText>
           ) : null}
+          <AppText color={message.mine ? colors.textOnPrimary : colors.text} style={styles.body}>
+            {message.content}
+          </AppText>
+          <View style={styles.meta}>
+            <AppText variant="caption" color={message.mine ? '#FFFFFFB8' : colors.textMuted}>
+              {new Date(message.createdAt).toLocaleTimeString('en-NG', {
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
+            </AppText>
+            {message.mine ? (
+              <Ionicons
+                name={message.read ? 'checkmark-done' : 'checkmark'}
+                size={15}
+                color={message.read ? '#BAF5D1' : '#FFFFFFB8'}
+              />
+            ) : null}
+          </View>
         </View>
       </View>
+    </View>
+  );
+}
+
+function DateDivider({ value }: { value: string }) {
+  const { colors } = useAppTheme();
+  const date = new Date(value);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const label =
+    date.toDateString() === today.toDateString()
+      ? 'Today'
+      : date.toDateString() === yesterday.toDateString()
+        ? 'Yesterday'
+        : date.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+  return (
+    <View style={styles.dateDivider}>
+      <View style={[styles.dateLine, { backgroundColor: colors.divider }]} />
+      <AppText variant="caption" color={colors.textMuted}>
+        {label}
+      </AppText>
+      <View style={[styles.dateLine, { backgroundColor: colors.divider }]} />
     </View>
   );
 }
@@ -368,25 +483,34 @@ const styles = StyleSheet.create({
   messageList: {
     flexGrow: 1,
     justifyContent: 'flex-end',
-    gap: spacing.sm,
+    gap: 3,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xl,
   },
   messageRow: { alignItems: 'flex-start' },
   mineRow: { alignItems: 'flex-end' },
+  messageItem: { gap: spacing.md },
   bubble: {
-    maxWidth: '82%',
+    maxWidth: '80%',
     gap: 5,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
   },
-  body: { lineHeight: 21 },
+  mineBubble: { borderTopRightRadius: 7 },
+  receivedBubble: { borderTopLeftRadius: 7 },
+  body: { lineHeight: 22 },
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3 },
+  dateDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.lg,
+  },
+  dateLine: { flex: 1, height: StyleSheet.hairlineWidth },
   composer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     gap: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,
@@ -398,10 +522,10 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     minHeight: 48,
     borderWidth: 1,
-    borderRadius: radius.lg,
+    borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    textAlignVertical: 'top',
+    paddingVertical: 0,
+    textAlignVertical: 'center',
   },
   send: {
     width: 48,
@@ -428,4 +552,22 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   readOnlyCopy: { flex: 1 },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing.xl,
+    backgroundColor: 'rgba(4, 11, 24, 0.66)',
+  },
+  deletePrompt: { borderRadius: radius.xl, padding: spacing.xl, gap: spacing.md },
+  warningMark: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promptTitle: { marginTop: spacing.xs },
+  promptCopy: { lineHeight: 22 },
+  promptActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  promptButton: { flex: 1 },
 });

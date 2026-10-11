@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { Image, Modal, Pressable, StyleSheet, View } from 'react-native';
 
 import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
 import { AppText } from '@/src/components/ui/AppText';
@@ -22,6 +22,9 @@ export default function MessagesScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [selected, setSelected] = useState<Conversation | null>(null);
+  const [deletePromptVisible, setDeletePromptVisible] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async (page = 0, quiet = false) => {
     if (!quiet) page === 0 ? setLoading(true) : setLoadingMore(true);
@@ -52,6 +55,26 @@ export default function MessagesScreen() {
       }
     }
   }, []);
+
+  async function deleteSelectedConversation() {
+    if (!selected || deleting) return;
+    setDeleting(true);
+    setError('');
+    try {
+      await chatApi.deleteForMe(selected.taskId);
+      setResult((current) => ({
+        ...current,
+        items: current.items.filter((item) => item.taskId !== selected.taskId),
+      }));
+      setDeletePromptVisible(false);
+      setSelected(null);
+    } catch (cause) {
+      setDeletePromptVisible(false);
+      setError(cause instanceof ApiError ? cause.message : "We couldn't delete this conversation.");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -90,10 +113,42 @@ export default function MessagesScreen() {
   return (
     <Screen contentStyle={styles.screen}>
       <AnimatedEntrance style={styles.header}>
-        <AppText variant="title">Messages</AppText>
-        <AppText color={colors.textSecondary}>
-          Private conversations linked to accepted tasks.
-        </AppText>
+        {selected ? (
+          <View style={styles.selectionHeader}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear conversation selection"
+              onPress={() => setSelected(null)}
+              style={({ pressed }) => [styles.selectionClose, { opacity: pressed ? 0.55 : 1 }]}
+            >
+              <Ionicons name="close" size={24} color={colors.text} />
+            </Pressable>
+            <View style={styles.selectionCopy}>
+              <AppText variant="subtitle">1 selected</AppText>
+              <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
+                {selected.participantName}
+              </AppText>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Delete selected conversation"
+              onPress={() => setDeletePromptVisible(true)}
+              style={({ pressed }) => [
+                styles.deleteAction,
+                { backgroundColor: colors.dangerSoft, opacity: pressed ? 0.65 : 1 },
+              ]}
+            >
+              <Ionicons name="trash-outline" size={22} color={colors.danger} />
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <AppText variant="title">Messages</AppText>
+            <AppText color={colors.textSecondary}>
+              Conversations for tasks that are still in progress.
+            </AppText>
+          </>
+        )}
       </AnimatedEntrance>
 
       {loading ? (
@@ -124,12 +179,18 @@ export default function MessagesScreen() {
               key={conversation.taskId}
               conversation={conversation}
               bordered={index > 0}
-              onPress={() =>
+              selected={selected?.taskId === conversation.taskId}
+              onLongPress={() => setSelected(conversation)}
+              onPress={() => {
+                if (selected) {
+                  setSelected(selected.taskId === conversation.taskId ? null : conversation);
+                  return;
+                }
                 router.push({
                   pathname: '/task/[id]/chat',
                   params: { id: conversation.taskId },
-                } as never)
-              }
+                } as never);
+              }}
             />
           ))}
           {result.hasNext ? (
@@ -142,6 +203,53 @@ export default function MessagesScreen() {
           ) : null}
         </AnimatedEntrance>
       )}
+
+      <Modal
+        visible={deletePromptVisible && Boolean(selected)}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => !deleting && setDeletePromptVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            accessibilityLabel="Cancel deleting conversation"
+            onPress={() => !deleting && setDeletePromptVisible(false)}
+          />
+          <View style={[styles.deletePrompt, { backgroundColor: colors.surface }]}>
+            <View style={[styles.warningMark, { backgroundColor: colors.dangerSoft }]}>
+              <Ionicons name="trash-outline" size={27} color={colors.danger} />
+            </View>
+            <AppText variant="title" style={styles.promptTitle}>
+              Delete conversation?
+            </AppText>
+            <AppText color={colors.textSecondary} style={styles.promptCopy}>
+              This removes your existing conversation with {selected?.participantName} from this
+              device and your TaskGrid inbox. It does not remove their copy. A new message will make
+              the conversation appear again.
+            </AppText>
+            <View style={styles.promptActions}>
+              <View style={styles.promptButton}>
+                <Button
+                  label="Keep conversation"
+                  variant="ghost"
+                  disabled={deleting}
+                  onPress={() => setDeletePromptVisible(false)}
+                />
+              </View>
+              <View style={styles.promptButton}>
+                <Button
+                  label="Delete"
+                  variant="danger"
+                  loading={deleting}
+                  onPress={() => void deleteSelectedConversation()}
+                />
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }
@@ -149,11 +257,15 @@ export default function MessagesScreen() {
 function ConversationRow({
   conversation,
   bordered,
+  selected,
   onPress,
+  onLongPress,
 }: {
   conversation: Conversation;
   bordered: boolean;
+  selected: boolean;
   onPress: () => void;
+  onLongPress: () => void;
 }) {
   const { colors } = useAppTheme();
   return (
@@ -161,10 +273,13 @@ function ConversationRow({
       accessibilityRole="button"
       accessibilityLabel={`Open conversation with ${conversation.participantName}`}
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={320}
       style={({ pressed }) => [
         styles.row,
         bordered && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
-        { opacity: pressed ? 0.62 : 1 },
+        selected && { backgroundColor: colors.primarySoft },
+        { opacity: pressed ? 0.72 : 1 },
       ]}
     >
       <View style={[styles.avatar, { backgroundColor: colors.primarySoft }]}>
@@ -201,6 +316,11 @@ function ConversationRow({
           ) : null}
         </View>
       </View>
+      {selected ? (
+        <View style={[styles.selectedMark, { backgroundColor: colors.primary }]}>
+          <Ionicons name="checkmark" size={15} color={colors.textOnPrimary} />
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -233,7 +353,17 @@ function ConversationSkeleton() {
 
 const styles = StyleSheet.create({
   screen: { gap: spacing.xl, paddingTop: spacing.xl },
-  header: { gap: spacing.xs },
+  header: { minHeight: 62, justifyContent: 'center', gap: spacing.xs },
+  selectionHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  selectionClose: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  selectionCopy: { flex: 1 },
+  deleteAction: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   list: { gap: 0 },
   row: {
     minHeight: 94,
@@ -241,6 +371,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.sm,
+    marginHorizontal: -spacing.sm,
+    borderRadius: radius.lg,
   },
   avatar: {
     width: 56,
@@ -264,6 +397,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  selectedMark: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing.xl,
+    backgroundColor: 'rgba(4, 11, 24, 0.66)',
+  },
+  deletePrompt: {
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    gap: spacing.md,
+  },
+  warningMark: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promptTitle: { marginTop: spacing.xs },
+  promptCopy: { lineHeight: 22 },
+  promptActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  promptButton: { flex: 1 },
   state: {
     flex: 1,
     alignItems: 'center',

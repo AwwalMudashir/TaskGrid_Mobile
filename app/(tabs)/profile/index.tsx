@@ -178,6 +178,12 @@ export default function ProfileScreen() {
         {user?.role === 'RUNNER' ? (
           <>
             <SettingsRow
+              icon="ribbon-outline"
+              title="Worker profile"
+              subtitle="Your skills, work status, rating and reviews"
+              onPress={() => router.push('/(tabs)/profile/worker-profile' as never)}
+            />
+            <SettingsRow
               icon="shield-checkmark-outline"
               title="Identity verification"
               subtitle="Check, complete or appeal your KYC status"

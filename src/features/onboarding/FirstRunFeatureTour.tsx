@@ -1,7 +1,7 @@
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { BlurView } from "expo-blur";
-import { useRouter } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { BlurView } from 'expo-blur';
+import { useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
@@ -11,82 +11,126 @@ import {
   useWindowDimensions,
   View,
   type ViewStyle,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppText } from "@/src/components/ui/AppText";
-import { useAuth } from "@/src/features/auth/AuthContext";
-import { consumePendingFeatureTour } from "@/src/features/onboarding/feature-tour-storage";
-import { useTourTargets } from "@/src/features/onboarding/TourTargetRegistry";
-import { radius, shadows, spacing, useAppTheme } from "@/src/theme";
+import { AppText } from '@/src/components/ui/AppText';
+import { useAuth } from '@/src/features/auth/AuthContext';
+import { consumePendingFeatureTour } from '@/src/features/onboarding/feature-tour-storage';
+import { useTourTargets } from '@/src/features/onboarding/TourTargetRegistry';
+import { radius, shadows, spacing, useAppTheme } from '@/src/theme';
 
 type Spotlight = { x: number; y: number; width: number; height: number };
+type SosDemoLayout = Spotlight & {
+  pageX: number;
+  pageY: number;
+  pageWidth: number;
+  pageHeight: number;
+};
 type TourStep = {
   eyebrow: string;
   title: string;
   description: string;
-  target: "hero" | "tasks" | "messages" | "wallet" | "profile";
+  target: 'hero' | 'tasks' | 'messages' | 'wallet' | 'profile' | 'sos-demo';
 };
+
+const SOS_BUTTON_SIZE = 56;
+const SOS_RING_PADDING = 8;
+const NAV_SPOTLIGHT_SIZE = 68;
+
+function createSosDemoLayout(width: number, height: number, topInset: number): SosDemoLayout {
+  const pageX = spacing.lg;
+  const pageY = topInset + spacing.lg;
+  const pageWidth = width - spacing.lg * 2;
+  const pageHeight = Math.min(260, height * 0.32);
+  const buttonX = pageX + pageWidth - spacing.lg - SOS_BUTTON_SIZE;
+  const buttonY = pageY + pageHeight - spacing.lg - SOS_BUTTON_SIZE;
+
+  return {
+    pageX,
+    pageY,
+    pageWidth,
+    pageHeight,
+    x: buttonX - SOS_RING_PADDING,
+    y: buttonY - SOS_RING_PADDING,
+    width: SOS_BUTTON_SIZE + SOS_RING_PADDING * 2,
+    height: SOS_BUTTON_SIZE + SOS_RING_PADDING * 2,
+  };
+}
 
 const workerSteps: TourStep[] = [
   {
-    eyebrow: "FIND THE RIGHT WORK",
-    title: "Start with nearby tasks",
+    eyebrow: 'FIND THE RIGHT WORK',
+    title: 'Start with nearby tasks',
     description:
-      "Browse work that fits your skills and location. You choose what to apply for and always see the task details first.",
-    target: "hero",
+      'Browse work that fits your skills and location. You choose what to apply for and always see the task details first.',
+    target: 'hero',
   },
   {
-    eyebrow: "FOLLOW EVERY STAGE",
-    title: "Your tasks stay organised",
+    eyebrow: 'FOLLOW EVERY STAGE',
+    title: 'Your tasks stay organised',
     description:
-      "Applications, accepted work, active jobs and completed tasks are kept together so you always know what happens next.",
-    target: "tasks",
+      'Applications, accepted work, active jobs and completed tasks are kept together so you always know what happens next.',
+    target: 'tasks',
   },
   {
-    eyebrow: "PAYMENT PROTECTION",
-    title: "Know where your money is",
+    eyebrow: 'PAYMENT PROTECTION',
+    title: 'Know where your money is',
     description:
-      "Clients pay before work begins. Earnings move from protected payment to your wallet after completion is confirmed.",
-    target: "wallet",
+      'Clients pay before work begins. Earnings move from protected payment to your wallet after completion is confirmed.',
+    target: 'wallet',
   },
   {
-    eyebrow: "BUILD TRUST SAFELY",
-    title: "Finish your trusted profile",
+    eyebrow: 'BUILD TRUST SAFELY',
+    title: 'Finish your trusted profile',
     description:
-      "Manage identity checks, skills, your payout bank and emergency contact here. Location sharing is always consent-based.",
-    target: "profile",
+      'Manage identity checks, skills, your payout bank and emergency contact here. Location sharing is always consent-based.',
+    target: 'profile',
+  },
+  {
+    eyebrow: 'HELP WHEN IT MATTERS',
+    title: 'SOS appears after arrival',
+    description:
+      'During an active task, SOS becomes available after you arrive. After confirmation, TaskGrid sends your saved emergency contact an SMS with the task and your latest location. It does not contact the police automatically, so call local emergency services if danger is immediate.',
+    target: 'sos-demo',
   },
 ];
 
 const clientSteps: TourStep[] = [
   {
-    eyebrow: "POST WITH CLARITY",
-    title: "Describe what you need",
+    eyebrow: 'POST WITH CLARITY',
+    title: 'Describe what you need',
     description:
-      "Add the job, budget, time, location and helpful photos. Clear information helps workers send useful bids.",
-    target: "hero",
+      'Add the job, budget, time, location and helpful photos. Clear information helps workers send useful bids.',
+    target: 'hero',
   },
   {
-    eyebrow: "YOU STAY IN CONTROL",
-    title: "Compare before choosing",
+    eyebrow: 'YOU STAY IN CONTROL',
+    title: 'Compare before choosing',
     description:
-      "Review bids, worker profiles, skills and ratings. TaskGrid can recommend options, but the final choice is yours.",
-    target: "tasks",
+      'Review bids, worker profiles, skills and ratings. TaskGrid can recommend options, but the final choice is yours.',
+    target: 'tasks',
   },
   {
-    eyebrow: "KEEP THE CONVERSATION",
-    title: "Use task messages",
+    eyebrow: 'KEEP THE CONVERSATION',
+    title: 'Use task messages',
     description:
-      "Keep important job details connected to the task instead of losing them across calls and separate chats.",
-    target: "messages",
+      'Keep important job details connected to the task instead of losing them across calls and separate chats.',
+    target: 'messages',
   },
   {
-    eyebrow: "TRUST AND PROTECTION",
-    title: "Safety settings live here",
+    eyebrow: 'TRUST AND PROTECTION',
+    title: 'Safety settings live here',
     description:
-      "Complete verification and add an emergency contact before work. Protected payment and disputes help both sides stay covered.",
-    target: "profile",
+      'Complete verification and add an emergency contact before work. Protected payment and disputes help both sides stay covered.',
+    target: 'profile',
+  },
+  {
+    eyebrow: 'HELP WHEN IT MATTERS',
+    title: 'SOS appears after arrival',
+    description:
+      'During an active task, SOS becomes available after the worker arrives. After confirmation, TaskGrid sends your saved emergency contact an SMS with the task and your latest location. It does not contact the police automatically, so call local emergency services if danger is immediate.',
+    target: 'sos-demo',
   },
 ];
 
@@ -100,21 +144,25 @@ export function FirstRunFeatureTour() {
   const [visible, setVisible] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const arrowMotion = useRef(new Animated.Value(0)).current;
-  const steps = user?.role === "RUNNER" ? workerSteps : clientSteps;
+  const steps = user?.role === 'RUNNER' ? workerSteps : clientSteps;
   const step = steps[stepIndex];
+  const sosDemoLayout = useMemo(
+    () => createSosDemoLayout(width, height, insets.top),
+    [height, insets.top, width],
+  );
 
   useEffect(() => {
     let active = true;
     let revealTimer: ReturnType<typeof setTimeout> | undefined;
     setVisible(false);
     setStepIndex(0);
-    if (!user || user.role === "ADMIN") return () => undefined;
+    if (!user || user.role === 'ADMIN') return () => undefined;
 
     const currentUser = user;
     void consumePendingFeatureTour(currentUser)
       .then((shouldShow) => {
         if (!active || !shouldShow) return;
-        router.replace("/(tabs)");
+        router.replace('/(tabs)');
         revealTimer = setTimeout(() => {
           if (active) setVisible(true);
         }, 450);
@@ -151,7 +199,7 @@ export function FirstRunFeatureTour() {
 
   const target = useMemo<Spotlight>(() => {
     const horizontalMargin = spacing.md;
-    if (step.target === "hero") {
+    if (step.target === 'hero') {
       return {
         x: horizontalMargin,
         y: insets.top + 84,
@@ -159,54 +207,49 @@ export function FirstRunFeatureTour() {
         height: Math.min(300, height * 0.38),
       };
     }
+    if (step.target === 'sos-demo') return sosDemoLayout;
 
-    const spotlightSize =
-      step.target === "messages" ? 78 : step.target === "profile" ? 74 : 70;
     const measured = targets[step.target];
     if (measured) {
-      const verticalNudge = step.target === "messages" ? 3 : 0;
       return {
         x: Math.max(
           4,
           Math.min(
-            width - spotlightSize - 4,
-            measured.x + measured.width / 2 - spotlightSize / 2,
+            width - NAV_SPOTLIGHT_SIZE - 4,
+            measured.x + measured.width / 2 - NAV_SPOTLIGHT_SIZE / 2,
           ),
         ),
         y: Math.max(
           4,
           Math.min(
-            height - spotlightSize - 4,
-            measured.y +
-              measured.height / 2 -
-              spotlightSize / 2 +
-              verticalNudge,
+            height - NAV_SPOTLIGHT_SIZE - 4,
+            measured.y + measured.height / 2 - NAV_SPOTLIGHT_SIZE / 2,
           ),
         ),
-        width: spotlightSize,
-        height: spotlightSize,
+        width: NAV_SPOTLIGHT_SIZE,
+        height: NAV_SPOTLIGHT_SIZE,
       };
     }
 
-    const tabCount = user?.role === "RUNNER" ? 5 : 4;
+    const tabCount = user?.role === 'RUNNER' ? 5 : 4;
     const tabIndex =
-      step.target === "tasks"
+      step.target === 'tasks'
         ? 1
-        : step.target === "profile"
+        : step.target === 'profile'
           ? tabCount - 1
-          : step.target === "wallet"
+          : step.target === 'wallet'
             ? 3
             : 2;
     const tabWidth = width / tabCount;
     return {
-      x: tabIndex * tabWidth + (tabWidth - spotlightSize) / 2,
-      y: height - spotlightSize - 4,
-      width: spotlightSize,
-      height: spotlightSize,
+      x: tabIndex * tabWidth + (tabWidth - NAV_SPOTLIGHT_SIZE) / 2,
+      y: height - insets.bottom - 74 + (74 - NAV_SPOTLIGHT_SIZE) / 2,
+      width: NAV_SPOTLIGHT_SIZE,
+      height: NAV_SPOTLIGHT_SIZE,
     };
-  }, [height, insets.top, step.target, targets, user?.role, width]);
+  }, [height, insets.bottom, insets.top, sosDemoLayout, step.target, targets, user?.role, width]);
 
-  if (!user || user.role === "ADMIN" || !step) return null;
+  if (!user || user.role === 'ADMIN' || !step) return null;
 
   function finish() {
     setVisible(false);
@@ -221,26 +264,28 @@ export function FirstRunFeatureTour() {
   }
 
   const targetIsLow = target.y > height / 2;
-  const navTarget = step.target !== "hero";
+  const navTarget = ['tasks', 'messages', 'wallet', 'profile'].includes(step.target);
+  const sosTarget = step.target === 'sos-demo';
   const cardPosition = targetIsLow
     ? { bottom: height - target.y + 72 }
     : { top: Math.min(target.y + target.height + 72, height - 300) };
-  const arrowLeft = Math.max(
-    12,
-    Math.min(width - 56, target.x + target.width / 2 - 22),
-  );
+  const arrowLeft = Math.max(12, Math.min(width - 56, target.x + target.width / 2 - 22));
   const arrowTranslate = arrowMotion.interpolate({
     inputRange: [0, 1],
     outputRange: targetIsLow ? [-2, 7] : [2, -7],
   });
+  const ringScale = arrowMotion.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.06],
+  });
   const navPresentation =
-    step.target === "tasks"
-      ? { icon: "clipboard" as const, label: "Tasks" }
-      : step.target === "profile"
-        ? { icon: "person" as const, label: "Profile" }
-        : step.target === "wallet"
-          ? { icon: "wallet" as const, label: "Wallet" }
-          : { icon: "chatbubble" as const, label: "Messages" };
+    step.target === 'tasks'
+      ? { icon: 'clipboard' as const, label: 'Tasks' }
+      : step.target === 'profile'
+        ? { icon: 'person' as const, label: 'Profile' }
+        : step.target === 'wallet'
+          ? { icon: 'wallet' as const, label: 'Wallet' }
+          : { icon: 'chatbubble' as const, label: 'Messages' };
 
   return (
     <Modal
@@ -277,11 +322,7 @@ export function FirstRunFeatureTour() {
                 },
               ]}
             >
-              <Ionicons
-                name={navPresentation.icon}
-                size={25}
-                color={colors.primary}
-              />
+              <Ionicons name={navPresentation.icon} size={25} color={colors.primary} />
               <AppText
                 variant="caption"
                 color={colors.primary}
@@ -293,22 +334,36 @@ export function FirstRunFeatureTour() {
               </AppText>
             </View>
           </>
+        ) : sosTarget ? (
+          <>
+            <BlurPanel style={styles.fullBlur} dark={isDark} />
+            <SosDemoPage layout={sosDemoLayout} />
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.sosSpotlight,
+                {
+                  left: target.x,
+                  top: target.y,
+                  width: target.width,
+                  height: target.height,
+                  borderRadius: target.width / 2,
+                  borderColor: colors.danger,
+                  shadowColor: colors.danger,
+                  transform: [{ scale: ringScale }],
+                },
+              ]}
+            />
+          </>
         ) : (
-          <HeroSpotlight
-            target={target}
-            width={width}
-            height={height}
-            dark={isDark}
-          />
+          <HeroSpotlight target={target} width={width} height={height} dark={isDark} />
         )}
 
         <Animated.View
           pointerEvents="none"
           style={[
             styles.arrow,
-            targetIsLow
-              ? { top: target.y - 54 }
-              : { top: target.y + target.height + 8 },
+            targetIsLow ? { top: target.y - 54 } : { top: target.y + target.height + 8 },
             {
               left: arrowLeft,
               backgroundColor: colors.primary,
@@ -318,7 +373,7 @@ export function FirstRunFeatureTour() {
           ]}
         >
           <Ionicons
-            name={targetIsLow ? "arrow-down" : "arrow-up"}
+            name={targetIsLow ? 'arrow-down' : 'arrow-up'}
             size={27}
             color={colors.textOnPrimary}
           />
@@ -349,10 +404,8 @@ export function FirstRunFeatureTour() {
                 style={[
                   styles.progressDot,
                   {
-                    backgroundColor:
-                      index === stepIndex ? colors.primary : colors.border,
-                    borderColor:
-                      index === stepIndex ? colors.primary : colors.textMuted,
+                    backgroundColor: index === stepIndex ? colors.primary : colors.border,
+                    borderColor: index === stepIndex ? colors.primary : colors.textMuted,
                   },
                 ]}
               />
@@ -373,14 +426,10 @@ export function FirstRunFeatureTour() {
               ]}
             >
               <AppText variant="button" color={colors.textOnPrimary}>
-                {stepIndex === steps.length - 1
-                  ? "Start using TaskGrid"
-                  : "Next"}
+                {stepIndex === steps.length - 1 ? 'Start using TaskGrid' : 'Next'}
               </AppText>
               <Ionicons
-                name={
-                  stepIndex === steps.length - 1 ? "checkmark" : "arrow-forward"
-                }
+                name={stepIndex === steps.length - 1 ? 'checkmark' : 'arrow-forward'}
                 size={18}
                 color={colors.textOnPrimary}
               />
@@ -389,6 +438,72 @@ export function FirstRunFeatureTour() {
         </View>
       </View>
     </Modal>
+  );
+}
+
+function SosDemoPage({ layout }: { layout: SosDemoLayout }) {
+  const { colors } = useAppTheme();
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.sosDemo,
+        shadows.card,
+        {
+          left: layout.pageX,
+          top: layout.pageY,
+          width: layout.pageWidth,
+          height: layout.pageHeight,
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={styles.sosDemoHeader}>
+        <View style={styles.sosDemoHeading}>
+          <AppText variant="eyebrow" color={colors.primary}>
+            ACTIVE TASK DEMO
+          </AppText>
+          <AppText variant="subtitle">Home electrical repair</AppText>
+        </View>
+        <View style={[styles.arrivedBadge, { backgroundColor: colors.successSoft }]}>
+          <View style={[styles.arrivedDot, { backgroundColor: colors.success }]} />
+          <AppText variant="caption" color={colors.success}>
+            ARRIVED
+          </AppText>
+        </View>
+      </View>
+
+      <View style={[styles.demoJourney, { backgroundColor: colors.surfaceSecondary }]}>
+        <View style={styles.demoRoute}>
+          <View style={[styles.demoRoutePoint, { backgroundColor: colors.primary }]}>
+            <Ionicons name="person" size={15} color={colors.textOnPrimary} />
+          </View>
+          <View style={[styles.demoRouteLine, { backgroundColor: colors.success }]} />
+          <View style={[styles.demoRoutePoint, { backgroundColor: colors.success }]}>
+            <Ionicons name="checkmark" size={17} color={colors.textOnPrimary} />
+          </View>
+        </View>
+        <View style={styles.demoJourneyCopy}>
+          <AppText variant="bodyMedium">Arrival confirmed</AppText>
+          <AppText variant="caption" color={colors.textMuted}>
+            Safety actions are now available for this active task.
+          </AppText>
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.demoSosButton,
+          {
+            backgroundColor: colors.danger,
+            shadowColor: colors.danger,
+          },
+        ]}
+      >
+        <Ionicons name="alert" size={25} color={colors.textOnPrimary} />
+      </View>
+    </View>
   );
 }
 
@@ -405,10 +520,7 @@ function HeroSpotlight({
 }) {
   return (
     <>
-      <BlurPanel
-        style={{ left: 0, top: 0, width, height: target.y }}
-        dark={dark}
-      />
+      <BlurPanel style={{ left: 0, top: 0, width, height: target.y }} dark={dark} />
       <BlurPanel
         style={{
           left: 0,
@@ -445,7 +557,7 @@ function BlurPanel({ style, dark }: { style: ViewStyle; dark: boolean }) {
     <BlurView
       pointerEvents="none"
       intensity={48}
-      tint={dark ? "dark" : "regular"}
+      tint={dark ? 'dark' : 'regular'}
       blurMethod="dimezisBlurViewSdk31Plus"
       style={[styles.blurPanel, style]}
     />
@@ -455,36 +567,101 @@ function BlurPanel({ style, dark }: { style: ViewStyle; dark: boolean }) {
 const styles = StyleSheet.create({
   overlay: { flex: 1 },
   blurPanel: {
-    position: "absolute",
-    backgroundColor: "rgba(5, 12, 28, 0.38)",
+    position: 'absolute',
+    backgroundColor: 'rgba(5, 12, 28, 0.38)',
   },
   fullBlur: { left: 0, top: 0, right: 0, bottom: 0 },
   navSpotlight: {
-    position: "absolute",
+    position: 'absolute',
     zIndex: 4,
     borderWidth: 3,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 1,
     shadowOpacity: 0.8,
     shadowRadius: 16,
     elevation: 20,
   },
-  navLabel: { width: "88%", fontSize: 10, textAlign: "center" },
+  navLabel: { width: '88%', fontSize: 10, textAlign: 'center' },
+  sosSpotlight: {
+    position: 'absolute',
+    zIndex: 5,
+    borderWidth: 3,
+    backgroundColor: 'transparent',
+    shadowOpacity: 0.9,
+    shadowRadius: 15,
+    elevation: 22,
+  },
+  sosDemo: {
+    position: 'absolute',
+    zIndex: 3,
+    borderWidth: 1,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    overflow: 'visible',
+  },
+  sosDemoHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  sosDemoHeading: { flex: 1, gap: 3 },
+  arrivedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  arrivedDot: { width: 7, height: 7, borderRadius: 4 },
+  demoJourney: {
+    marginTop: spacing.lg,
+    marginRight: SOS_BUTTON_SIZE + spacing.xl,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  demoRoute: { alignItems: 'center' },
+  demoRoutePoint: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  demoRouteLine: { width: 2, height: 18 },
+  demoJourneyCopy: { flex: 1, gap: 2 },
+  demoSosButton: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: spacing.lg,
+    width: SOS_BUTTON_SIZE,
+    height: SOS_BUTTON_SIZE,
+    borderRadius: SOS_BUTTON_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.5,
+    shadowRadius: 11,
+    elevation: 18,
+  },
   arrow: {
-    position: "absolute",
+    position: 'absolute',
     zIndex: 5,
     width: 44,
     height: 44,
     borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     shadowOpacity: 0.58,
     shadowRadius: 12,
     elevation: 18,
   },
   card: {
-    position: "absolute",
+    position: 'absolute',
     left: spacing.lg,
     right: spacing.lg,
     borderWidth: 1,
@@ -493,24 +670,24 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   cardTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  progress: { flexDirection: "row", gap: 8, marginTop: spacing.sm },
+  progress: { flexDirection: 'row', gap: 8, marginTop: spacing.sm },
   progressDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1 },
   actions: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: spacing.md,
   },
   nextButton: {
     minHeight: 44,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.sm,
   },
 });

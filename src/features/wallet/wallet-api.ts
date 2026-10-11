@@ -8,7 +8,9 @@ export type TransactionStatus =
   | 'IN_PROGRESS'
   | 'COMPLETED'
   | 'RELEASED'
+  | 'PARTIALLY_RELEASED'
   | 'REFUNDED'
+  | 'REFUND_PENDING'
   | 'DISPUTED'
   | 'PROCESSING'
   | 'FAILED'
@@ -24,12 +26,18 @@ export type WalletSummary = {
 export type WalletTransaction = {
   id: string;
   taskId: string | null;
+  taskTitle: string | null;
   type: 'ESCROW' | 'WITHDRAWAL' | 'REFERRAL_PAYOUT' | 'MICRO_TASK_PAYOUT';
   status: TransactionStatus;
   amount: number;
   currency: string;
+  sourceName: string;
+  destinationName: string;
+  destinationBankName: string | null;
+  destinationMaskedAccountNumber: string | null;
   failureReason: string | null;
   createdAt: string;
+  statusUpdatedAt: string | null;
 };
 
 export type Withdrawal = {

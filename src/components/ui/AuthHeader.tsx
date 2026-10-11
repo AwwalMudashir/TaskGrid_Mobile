@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
@@ -10,9 +11,21 @@ type AuthHeaderProps = {
   subtitle?: string;
   back?: boolean;
   onBackPress?: () => void;
+  rightAction?: {
+    icon: ComponentProps<typeof Ionicons>['name'];
+    accessibilityLabel: string;
+    onPress: () => void;
+    color?: string;
+  };
 };
 
-export function AuthHeader({ title, subtitle, back = true, onBackPress }: AuthHeaderProps) {
+export function AuthHeader({
+  title,
+  subtitle,
+  back = true,
+  onBackPress,
+  rightAction,
+}: AuthHeaderProps) {
   const router = useRouter();
   const { colors } = useAppTheme();
 
@@ -36,6 +49,27 @@ export function AuthHeader({ title, subtitle, back = true, onBackPress }: AuthHe
           </AppText>
         ) : null}
       </View>
+      {rightAction ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={rightAction.accessibilityLabel}
+          hitSlop={8}
+          onPress={rightAction.onPress}
+          style={({ pressed }) => [
+            styles.rightAction,
+            {
+              backgroundColor: `${rightAction.color ?? colors.textSecondary}12`,
+              opacity: pressed ? 0.6 : 1,
+            },
+          ]}
+        >
+          <Ionicons
+            name={rightAction.icon}
+            size={22}
+            color={rightAction.color ?? colors.textSecondary}
+          />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -53,6 +87,13 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: radius.md,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rightAction: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
   },

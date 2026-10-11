@@ -126,6 +126,8 @@ export type TaskDetail = TaskCard & {
   runnerLatitude: number | null;
   runnerLongitude: number | null;
   runnerLocationUpdatedAt: string | null;
+  runnerDistanceToTaskMetres: number | null;
+  runnerEstimatedTravelMinutes: number | null;
   runnerCompletedAt: string | null;
   completionReviewDeadlineAt: string | null;
   disputeStatus: DisputeStatus | null;
@@ -172,6 +174,7 @@ export type TaskDispute = {
   clientRefundAmount: number | null;
   finalOutcome: DisputeOutcome | null;
   resolutionNote: string | null;
+  raisedById: string;
   raisedByName: string;
   resolvedByName: string | null;
   taskStatus: TaskStatus;
@@ -188,6 +191,7 @@ export type DisputeHistory = {
     | 'OPENED'
     | 'PARTY_RESPONSE_ADDED'
     | 'EVIDENCE_ADDED'
+    | 'CLOSED_BY_RAISER'
     | 'RESOLUTION_STARTED'
     | 'RESOLVED'
     | 'REFUND_FAILED';
@@ -260,10 +264,10 @@ export const taskApi = {
       authenticated: true,
     });
   },
-  apply(id: string, proposedPrice: number, etaMinutes: number, message: string) {
+  apply(id: string, proposedPrice: number, coordinates: Coordinates, message: string) {
     return apiRequest<TaskDetail>(`/tasks/${id}/bids`, {
       method: 'POST',
-      body: { proposedPrice, etaMinutes, message },
+      body: { proposedPrice, ...coordinates, message },
       authenticated: true,
     });
   },
@@ -327,6 +331,12 @@ export const taskApi = {
     return apiRequest<TaskDispute>(`/tasks/${id}/dispute/response`, {
       method: 'POST',
       body: { statement },
+      authenticated: true,
+    });
+  },
+  closeDispute(id: string) {
+    return apiRequest<TaskDispute>(`/tasks/${id}/dispute/close`, {
+      method: 'POST',
       authenticated: true,
     });
   },

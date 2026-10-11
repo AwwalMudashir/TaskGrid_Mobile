@@ -146,6 +146,7 @@ export default function KycScreen() {
       setLoading(false);
       return;
     }
+    setLoading(true);
     setError('');
     try {
       setResult(await kycApi.status());
@@ -260,6 +261,27 @@ export default function KycScreen() {
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color={colors.primary} />
           <AppText color={colors.textSecondary}>Loading your verification status…</AppText>
+        </View>
+      </Screen>
+    );
+  }
+
+  if (!result && error) {
+    return (
+      <Screen contentStyle={styles.screen}>
+        <AuthHeader title="Identity verification" />
+        <View style={styles.loadingState}>
+          <View style={[styles.checkingOrb, { backgroundColor: colors.dangerSoft }]}>
+            <Ionicons name="cloud-offline-outline" size={38} color={colors.danger} />
+          </View>
+          <AppText variant="title" style={styles.centerText}>
+            Status unavailable
+          </AppText>
+          <AppText color={colors.textSecondary} style={styles.centerText}>
+            We could not confirm your verification status. This does not mean your account is
+            unverified.
+          </AppText>
+          <Button label="Try again" variant="secondary" onPress={() => void loadStatus()} />
         </View>
       </Screen>
     );

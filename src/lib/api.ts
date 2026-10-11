@@ -11,6 +11,7 @@ import type {
   UpdateProfilePayload,
   User,
   WorkerSummary,
+  WorkerProfile,
   TaskSummary,
   SupportOptions,
 } from '@/src/features/auth/types';
@@ -339,6 +340,9 @@ async function sendProfileImage(image: LocalProfileImage, retry = true): Promise
 }
 
 export const profileApi = {
+  worker() {
+    return apiRequest<WorkerProfile>('/profile/worker', { authenticated: true });
+  },
   update(body: UpdateProfilePayload) {
     return apiRequest<User>('/profile', { method: 'PATCH', body, authenticated: true });
   },
