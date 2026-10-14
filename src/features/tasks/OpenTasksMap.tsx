@@ -68,13 +68,20 @@ export function OpenTasksMap({
             id={`open-task-${task.id}`}
             lngLat={[task.mapLongitude!, task.mapLatitude!]}
             anchor="center"
+            accessible
+            accessibilityRole="button"
+            accessibilityLabel={`Preview ${task.title}`}
+            onPress={() => setSelected(task)}
           >
-            <Pressable
+            <View
               collapsable={false}
-              accessibilityRole="button"
-              accessibilityLabel={`Preview ${task.title}`}
-              onPress={() => setSelected(task)}
-              style={[styles.taskMarkerHalo, { backgroundColor: `${colors.primary}28` }]}
+              style={[
+                styles.taskMarkerHalo,
+                {
+                  backgroundColor:
+                    selected?.id === task.id ? `${colors.primary}42` : `${colors.primary}28`,
+                },
+              ]}
             >
               <View
                 style={[
@@ -84,7 +91,7 @@ export function OpenTasksMap({
               >
                 <Ionicons name="briefcase" size={17} color={colors.textOnPrimary} />
               </View>
-            </Pressable>
+            </View>
           </Marker>
         ))}
       </Map>

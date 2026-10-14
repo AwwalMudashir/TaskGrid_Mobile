@@ -44,7 +44,7 @@ export default function CheckEmailScreen() {
           <AppText variant="title">Verify your email</AppText>
           <AppText color={colors.textSecondary} style={styles.centerText}>
             We sent a verification link to{email ? `\n${email}` : ' your email address'}. Tap it to
-            activate your TaskGrid account.
+            activate your TaskGrid account. Verification happens automatically when the link opens.
           </AppText>
         </View>
         {message ? <NoticeCard tone="success">{message}</NoticeCard> : null}
@@ -62,7 +62,7 @@ export default function CheckEmailScreen() {
             loading={loading}
           />
           <Button
-            label="I’ve verified — sign in"
+            label="Back to sign in"
             variant="ghost"
             onPress={() => router.replace('/(auth)/login')}
           />

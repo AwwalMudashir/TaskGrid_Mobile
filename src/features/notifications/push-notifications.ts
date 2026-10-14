@@ -8,9 +8,21 @@ import { apiRequest } from '@/src/lib/api';
 const TOKEN_KEY = 'taskgrid.expoPushToken';
 const PREFERENCE_KEY = 'taskgrid.pushNotificationsEnabled';
 
+export type PushRegistrationResult =
+  | { registered: true; token: string }
+  | {
+      registered: false;
+      reason: 'disabled' | 'permission-denied' | 'permission-pending' | 'unavailable';
+    };
+
 export type PushPreferenceResult =
-  | { enabled: true; token: string }
-  | { enabled: false; reason?: 'disabled' | 'permission-denied' | 'unavailable' };
+  | { enabled: true; registration: 'registered'; token: string }
+  | {
+      enabled: true;
+      registration: 'pending';
+      reason: 'permission-pending' | 'unavailable';
+    }
+  | { enabled: false; registration: 'disabled'; reason: 'disabled' | 'permission-denied' };
 
 export type TaskNotificationData = {
   type?:
@@ -41,34 +53,38 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export async function registerCurrentDeviceForPush(): Promise<string | null> {
-  if (Platform.OS === 'web') return null;
+export async function registerCurrentDeviceForPush(): Promise<PushRegistrationResult> {
+  if (Platform.OS === 'web') return { registered: false, reason: 'unavailable' };
 
-  if (!(await arePushNotificationsEnabled())) return null;
-
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('task-updates', {
-      name: 'Task updates',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 200, 250],
-      lightColor: '#635BFF',
-    });
-  }
-
-  const existing = await Notifications.getPermissionsAsync();
-  const permission = existing.granted ? existing : await Notifications.requestPermissionsAsync();
-  if (!permission.granted) {
-    await SecureStore.setItemAsync(PREFERENCE_KEY, 'false');
-    return null;
-  }
-
-  const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-  if (!projectId) {
-    await SecureStore.setItemAsync(PREFERENCE_KEY, 'false');
-    return null;
+  if (!(await arePushNotificationsEnabled())) {
+    return { registered: false, reason: 'disabled' };
   }
 
   try {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('task-updates', {
+        name: 'Task updates',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 200, 250],
+        lightColor: '#635BFF',
+      });
+    }
+
+    const existing = await Notifications.getPermissionsAsync();
+    const permission = existing.granted ? existing : await Notifications.requestPermissionsAsync();
+    if (!permission.granted) {
+      if (permission.canAskAgain === false) {
+        await SecureStore.setItemAsync(PREFERENCE_KEY, 'false');
+        return { registered: false, reason: 'permission-denied' };
+      }
+      return { registered: false, reason: 'permission-pending' };
+    }
+
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) {
+      throw new Error('Expo project ID is missing from the application configuration.');
+    }
+
     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
     await apiRequest<void>('/notifications/devices', {
       method: 'POST',
@@ -76,10 +92,10 @@ export async function registerCurrentDeviceForPush(): Promise<string | null> {
       authenticated: true,
     });
     await SecureStore.setItemAsync(TOKEN_KEY, token);
-    return token;
+    return { registered: true, token };
   } catch (cause) {
-    await SecureStore.setItemAsync(PREFERENCE_KEY, 'false');
-    throw cause;
+    logPushFailure('Device registration failed', cause);
+    return { registered: false, reason: 'unavailable' };
   }
 }
 
@@ -89,33 +105,57 @@ export async function arePushNotificationsEnabled(): Promise<boolean> {
 }
 
 export async function setPushNotificationsEnabled(enabled: boolean): Promise<PushPreferenceResult> {
+  // The stored value represents the user's choice. Device registration is a
+  // separate operation and must not silently rewrite that choice after a
+  // temporary network, Expo or backend failure.
+  await SecureStore.setItemAsync(PREFERENCE_KEY, enabled ? 'true' : 'false');
+
   if (!enabled) {
-    await unregisterCurrentDeviceForPush();
-    await SecureStore.setItemAsync(PREFERENCE_KEY, 'false');
-    return { enabled: false, reason: 'disabled' };
+    try {
+      await unregisterCurrentDeviceForPush();
+    } catch {
+      // The preference is already off. The bridge retries token removal after
+      // the next authenticated session while a local token still exists.
+    }
+    return { enabled: false, registration: 'disabled', reason: 'disabled' };
   }
 
-  // Save first so registerCurrentDeviceForPush is allowed to run. Roll back when
-  // the OS or the build cannot provide a usable Expo token.
-  await SecureStore.setItemAsync(PREFERENCE_KEY, 'true');
-  const existingPermission = await Notifications.getPermissionsAsync();
-  const token = await registerCurrentDeviceForPush();
-  if (token) return { enabled: true, token };
+  const result = await registerCurrentDeviceForPush();
+  if (result.registered) {
+    return { enabled: true, registration: 'registered', token: result.token };
+  }
 
-  await SecureStore.setItemAsync(PREFERENCE_KEY, 'false');
+  if (result.reason === 'permission-denied') {
+    return { enabled: false, registration: 'disabled', reason: 'permission-denied' };
+  }
+
   return {
-    enabled: false,
-    reason: existingPermission.canAskAgain === false ? 'permission-denied' : 'unavailable',
+    enabled: true,
+    registration: 'pending',
+    reason: result.reason === 'permission-pending' ? 'permission-pending' : 'unavailable',
   };
 }
 
 export async function unregisterCurrentDeviceForPush(): Promise<void> {
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
   if (!token) return;
-  await apiRequest<void>('/notifications/devices', {
-    method: 'DELETE',
-    body: { token },
-    authenticated: true,
-  });
-  await SecureStore.deleteItemAsync(TOKEN_KEY);
+  try {
+    await apiRequest<void>('/notifications/devices', {
+      method: 'DELETE',
+      body: { token },
+      authenticated: true,
+    });
+    await SecureStore.deleteItemAsync(TOKEN_KEY);
+  } catch (cause) {
+    logPushFailure('Device unregistration failed', cause);
+    throw cause;
+  }
+}
+
+function logPushFailure(context: string, cause: unknown) {
+  const detail =
+    cause instanceof Error
+      ? { name: cause.name, message: cause.message, stack: cause.stack }
+      : { cause };
+  console.warn(`[TaskGrid push] ${context}`, detail);
 }

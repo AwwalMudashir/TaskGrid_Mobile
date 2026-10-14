@@ -6,11 +6,15 @@ import { API_BASE_URL } from '@/src/lib/api';
 import { getSessionTokens } from '@/src/lib/token-storage';
 
 export type ChatRealtimeEvent = {
-  type: 'MESSAGE_CREATED' | 'MESSAGES_READ';
+  type: 'MESSAGE_CREATED' | 'MESSAGE_DELETED' | 'MESSAGES_READ' | 'TYPING_CHANGED';
   taskId: string;
   message: ChatMessage | null;
+  messageId: string | null;
   readerId: string | null;
   readAt: string | null;
+  userId: string | null;
+  userName: string | null;
+  typing: boolean | null;
 };
 
 export type ChatSocketState = 'connecting' | 'connected' | 'disconnected';
@@ -21,12 +25,17 @@ type ChatSocketHandlers = {
   onConnected?(): void;
 };
 
+export type ChatChannelConnection = {
+  disconnect(): Promise<void>;
+  setTyping(taskId: string, typing: boolean): boolean;
+};
+
 const socketUrl = `${String(API_BASE_URL).replace(/^http/, 'ws').replace(/\/$/, '')}/ws`;
 
 export async function connectChatChannel(
   channel: string,
   handlers: ChatSocketHandlers,
-): Promise<() => Promise<void>> {
+): Promise<ChatChannelConnection> {
   let active = true;
   let subscription: StompSubscription | null = null;
   let foreground = AppState.currentState === 'active';
@@ -81,12 +90,22 @@ export async function connectChatChannel(
     });
   });
 
-  return async () => {
-    active = false;
-    appStateSubscription.remove();
-    await lifecycle;
-    subscription?.unsubscribe();
-    await client.deactivate();
+  return {
+    setTyping(taskId, typing) {
+      if (!active || !client.connected) return false;
+      client.publish({
+        destination: `/app/chat/${taskId}/typing`,
+        body: JSON.stringify({ typing }),
+      });
+      return true;
+    },
+    async disconnect() {
+      active = false;
+      appStateSubscription.remove();
+      await lifecycle;
+      subscription?.unsubscribe();
+      await client.deactivate();
+    },
   };
 }
 

@@ -21,6 +21,7 @@ import { useAuth } from '@/src/features/auth/AuthContext';
 import { chatApi, type ChatMessage } from '@/src/features/chat/chat-api';
 import {
   connectChatChannel,
+  type ChatChannelConnection,
   type ChatRealtimeEvent,
   type ChatSocketState,
 } from '@/src/features/chat/chat-socket';
@@ -37,6 +38,11 @@ export default function TaskChatScreen() {
   const { colors } = useAppTheme();
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remoteTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectionRef = useRef<ChatChannelConnection | null>(null);
+  const typingActiveRef = useRef(false);
+  const draftRef = useRef('');
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [page, setPage] = useState(0);
@@ -49,12 +55,42 @@ export default function TaskChatScreen() {
   const [socketState, setSocketState] = useState<ChatSocketState>('connecting');
   const [deletePromptVisible, setDeletePromptVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<ChatMessage | null>(null);
+  const [deletingMessage, setDeletingMessage] = useState(false);
+  const [participantTyping, setParticipantTyping] = useState(false);
 
   const participantName = useMemo(() => {
     if (!task) return 'Task conversation';
     return task.clientId === user?.id ? (task.assignedRunnerName ?? 'Worker') : task.clientName;
   }, [task, user?.id]);
   const readOnly = Boolean(task && closedStatuses.has(task.status));
+
+  const stopTyping = useCallback(() => {
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = null;
+    if (!id || !typingActiveRef.current) return;
+    connectionRef.current?.setTyping(id, false);
+    typingActiveRef.current = false;
+  }, [id]);
+
+  const updateDraft = useCallback(
+    (value: string) => {
+      draftRef.current = value;
+      setDraft(value);
+      if (!id || readOnly) return;
+
+      if (!value.trim()) {
+        stopTyping();
+        return;
+      }
+      if (!typingActiveRef.current) {
+        typingActiveRef.current = Boolean(connectionRef.current?.setTyping(id, true));
+      }
+      if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = setTimeout(stopTyping, 1_600);
+    },
+    [id, readOnly, stopTyping],
+  );
 
   const load = useCallback(
     async (nextPage = 0, quiet = false) => {
@@ -97,7 +133,7 @@ export default function TaskChatScreen() {
     useCallback(() => {
       if (!id) return undefined;
       let disposed = false;
-      let disconnect: (() => Promise<void>) | undefined;
+      let connection: ChatChannelConnection | undefined;
       let fallbackTimer: ReturnType<typeof setInterval> | undefined;
 
       const stopFallback = () => {
@@ -129,11 +165,23 @@ export default function TaskChatScreen() {
             250,
           );
         } else if (event.type === 'MESSAGES_READ' && event.readAt) {
+          const readAtTime = Date.parse(event.readAt);
+          if (Number.isNaN(readAtTime)) return;
           setMessages((current) =>
             current.map((message) =>
-              message.mine ? { ...message, read: true, readAt: event.readAt } : message,
+              message.mine && Date.parse(message.createdAt) <= readAtTime
+                ? { ...message, read: true, readAt: event.readAt }
+                : message,
             ),
           );
+        } else if (event.type === 'MESSAGE_DELETED' && event.messageId) {
+          setMessages((current) => current.filter((message) => message.id !== event.messageId));
+        } else if (event.type === 'TYPING_CHANGED') {
+          if (remoteTypingTimerRef.current) clearTimeout(remoteTypingTimerRef.current);
+          setParticipantTyping(Boolean(event.typing));
+          remoteTypingTimerRef.current = event.typing
+            ? setTimeout(() => setParticipantTyping(false), 3_500)
+            : null;
         }
       };
 
@@ -142,19 +190,31 @@ export default function TaskChatScreen() {
         onEvent: receive,
         onStateChange: socketStatus,
         onConnected: () => void load(0, true),
-      }).then((cleanup) => {
-        if (disposed) void cleanup();
-        else disconnect = cleanup;
+      }).then((connected) => {
+        if (disposed) {
+          void connected.disconnect();
+        } else {
+          connection = connected;
+          connectionRef.current = connected;
+          if (draftRef.current.trim()) {
+            typingActiveRef.current = connected.setTyping(id, true);
+          }
+        }
       });
 
       return () => {
         disposed = true;
         stopFallback();
+        stopTyping();
         if (readTimerRef.current) clearTimeout(readTimerRef.current);
         readTimerRef.current = null;
-        void disconnect?.();
+        if (remoteTypingTimerRef.current) clearTimeout(remoteTypingTimerRef.current);
+        remoteTypingTimerRef.current = null;
+        setParticipantTyping(false);
+        connectionRef.current = null;
+        void connection?.disconnect();
       };
-    }, [id, load]),
+    }, [id, load, stopTyping]),
   );
 
   async function send() {
@@ -162,15 +222,34 @@ export default function TaskChatScreen() {
     if (!id || !content || sending || readOnly) return;
     setSending(true);
     setError('');
+    stopTyping();
     try {
       const sent = await chatApi.send(id, content);
       setMessages((current) => [...current, sent]);
+      draftRef.current = '';
       setDraft('');
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "We couldn't send this message.");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function deleteSelectedMessage() {
+    if (!id || !selectedMessage || deletingMessage) return;
+    const messageId = selectedMessage.id;
+    setDeletingMessage(true);
+    setError('');
+    try {
+      await chatApi.deleteMessage(id, messageId);
+      setMessages((current) => current.filter((message) => message.id !== messageId));
+      setSelectedMessage(null);
+    } catch (cause) {
+      setSelectedMessage(null);
+      setError(cause instanceof ApiError ? cause.message : "We couldn't delete this message.");
+    } finally {
+      setDeletingMessage(false);
     }
   }
 
@@ -244,6 +323,7 @@ export default function TaskChatScreen() {
                   new Date(messages[index - 1]!.createdAt).toDateString() !==
                     new Date(item.createdAt).toDateString()
                 }
+                onLongPress={item.mine ? () => setSelectedMessage(item) : undefined}
               />
             )}
             contentContainerStyle={styles.messageList}
@@ -297,50 +377,89 @@ export default function TaskChatScreen() {
             </AppText>
           </View>
         ) : (
-          <View
-            style={[
-              styles.composer,
-              { backgroundColor: colors.surface, borderTopColor: colors.divider },
-            ]}
-          >
-            <TextInput
-              accessibilityLabel="Message"
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Message about this task"
-              placeholderTextColor={colors.textMuted}
-              maxLength={2000}
-              multiline
-              style={[
-                styles.input,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.surfaceSecondary,
-                  borderColor: colors.border,
-                },
-              ]}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Send message"
-              disabled={!draft.trim() || sending}
-              onPress={() => void send()}
-              style={({ pressed }) => [
-                styles.send,
-                {
-                  backgroundColor: colors.primary,
-                  opacity: !draft.trim() || sending ? 0.45 : pressed ? 0.75 : 1,
-                },
-              ]}
-            >
-              {sending ? (
-                <ActivityIndicator color={colors.textOnPrimary} />
-              ) : (
-                <Ionicons name="arrow-up" size={22} color={colors.textOnPrimary} />
-              )}
-            </Pressable>
+          <View style={{ backgroundColor: colors.surface }}>
+            {participantTyping ? <TypingIndicator name={participantName} /> : null}
+            <View style={[styles.composer, { borderTopColor: colors.divider }]}>
+              <TextInput
+                accessibilityLabel="Message"
+                value={draft}
+                onChangeText={updateDraft}
+                onBlur={stopTyping}
+                placeholder="Write a message"
+                placeholderTextColor={colors.textMuted}
+                maxLength={2000}
+                multiline
+                style={[
+                  styles.input,
+                  {
+                    color: colors.text,
+                    backgroundColor: colors.surfaceSecondary,
+                    borderColor: colors.border,
+                  },
+                ]}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Send message"
+                disabled={!draft.trim() || sending}
+                onPress={() => void send()}
+                style={({ pressed }) => [
+                  styles.send,
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: !draft.trim() || sending ? 0.45 : pressed ? 0.75 : 1,
+                  },
+                ]}
+              >
+                {sending ? (
+                  <ActivityIndicator color={colors.textOnPrimary} />
+                ) : (
+                  <Ionicons name="arrow-up" size={22} color={colors.textOnPrimary} />
+                )}
+              </Pressable>
+            </View>
           </View>
         )}
+
+        <Modal
+          visible={Boolean(selectedMessage)}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => !deletingMessage && setSelectedMessage(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              accessibilityLabel="Cancel deleting message"
+              onPress={() => !deletingMessage && setSelectedMessage(null)}
+            />
+            <View style={[styles.messageDeletePrompt, { backgroundColor: colors.surface }]}>
+              <AppText variant="subtitle">Delete this message?</AppText>
+              <AppText color={colors.textSecondary} style={styles.promptCopy}>
+                It will be removed from both sides of the conversation.
+              </AppText>
+              <View style={styles.promptActions}>
+                <View style={styles.promptButton}>
+                  <Button
+                    label="Cancel"
+                    variant="ghost"
+                    disabled={deletingMessage}
+                    onPress={() => setSelectedMessage(null)}
+                  />
+                </View>
+                <View style={styles.promptButton}>
+                  <Button
+                    label="Delete message"
+                    variant="danger"
+                    loading={deletingMessage}
+                    onPress={() => void deleteSelectedMessage()}
+                  />
+                </View>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         <Modal
           visible={deletePromptVisible}
@@ -397,35 +516,42 @@ function MessageBubble({
   message,
   showSender,
   showDate,
+  onLongPress,
 }: {
   message: ChatMessage;
   showSender: boolean;
   showDate: boolean;
+  onLongPress?: () => void;
 }) {
   const { colors } = useAppTheme();
   return (
     <View style={styles.messageItem}>
       {showDate ? <DateDivider value={message.createdAt} /> : null}
       <View style={[styles.messageRow, message.mine && styles.mineRow]}>
-        <View
+        <Pressable
+          disabled={!onLongPress}
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          accessibilityRole={onLongPress ? 'button' : undefined}
+          accessibilityHint={onLongPress ? 'Hold to delete this message' : undefined}
           style={[
             styles.bubble,
             message.mine ? styles.mineBubble : styles.receivedBubble,
             {
-              backgroundColor: message.mine ? colors.primary : colors.surfaceSecondary,
+              backgroundColor: message.mine ? colors.primarySoft : colors.surfaceSecondary,
             },
           ]}
         >
           {showSender && !message.mine ? (
-            <AppText variant="caption" color={colors.primary}>
+            <AppText variant="caption" color={colors.textSecondary}>
               {message.senderName}
             </AppText>
           ) : null}
-          <AppText color={message.mine ? colors.textOnPrimary : colors.text} style={styles.body}>
+          <AppText color={colors.text} style={styles.body}>
             {message.content}
           </AppText>
           <View style={styles.meta}>
-            <AppText variant="caption" color={message.mine ? '#FFFFFFB8' : colors.textMuted}>
+            <AppText variant="caption" color={colors.textMuted}>
               {new Date(message.createdAt).toLocaleTimeString('en-NG', {
                 hour: 'numeric',
                 minute: '2-digit',
@@ -435,11 +561,11 @@ function MessageBubble({
               <Ionicons
                 name={message.read ? 'checkmark-done' : 'checkmark'}
                 size={15}
-                color={message.read ? '#BAF5D1' : '#FFFFFFB8'}
+                color={message.read ? colors.primary : colors.textMuted}
               />
             ) : null}
           </View>
-        </View>
+        </Pressable>
       </View>
     </View>
   );
@@ -459,11 +585,25 @@ function DateDivider({ value }: { value: string }) {
         : date.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
   return (
     <View style={styles.dateDivider}>
-      <View style={[styles.dateLine, { backgroundColor: colors.divider }]} />
       <AppText variant="caption" color={colors.textMuted}>
         {label}
       </AppText>
-      <View style={[styles.dateLine, { backgroundColor: colors.divider }]} />
+    </View>
+  );
+}
+
+function TypingIndicator({ name }: { name: string }) {
+  const { colors } = useAppTheme();
+  return (
+    <View style={styles.typingIndicator} accessibilityLiveRegion="polite">
+      <View style={styles.typingDots}>
+        {[0, 1, 2].map((dot) => (
+          <View key={dot} style={[styles.typingDot, { backgroundColor: colors.primary }]} />
+        ))}
+      </View>
+      <AppText variant="caption" color={colors.textMuted}>
+        {name} is typing
+      </AppText>
     </View>
   );
 }
@@ -483,31 +623,37 @@ const styles = StyleSheet.create({
   messageList: {
     flexGrow: 1,
     justifyContent: 'flex-end',
-    gap: 3,
+    gap: 2,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xl,
   },
   messageRow: { alignItems: 'flex-start' },
   mineRow: { alignItems: 'flex-end' },
-  messageItem: { gap: spacing.md },
+  messageItem: { gap: spacing.sm },
   bubble: {
-    maxWidth: '80%',
-    gap: 5,
-    borderRadius: radius.xl,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: 10,
+    maxWidth: '82%',
+    gap: 4,
+    borderRadius: 16,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
   },
-  mineBubble: { borderTopRightRadius: 7 },
-  receivedBubble: { borderTopLeftRadius: 7 },
+  mineBubble: { borderBottomRightRadius: 5 },
+  receivedBubble: { borderBottomLeftRadius: 5 },
   body: { lineHeight: 22 },
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3 },
   dateDivider: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  typingIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.lg,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
   },
-  dateLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  typingDots: { flexDirection: 'row', gap: 3 },
+  typingDot: { width: 4, height: 4, borderRadius: 2 },
   composer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -559,6 +705,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(4, 11, 24, 0.66)',
   },
   deletePrompt: { borderRadius: radius.xl, padding: spacing.xl, gap: spacing.md },
+  messageDeletePrompt: { borderRadius: radius.lg, padding: spacing.xl, gap: spacing.md },
   warningMark: {
     width: 54,
     height: 54,

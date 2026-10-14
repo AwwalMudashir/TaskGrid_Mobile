@@ -7,6 +7,7 @@ import {
   arePushNotificationsEnabled,
   registerCurrentDeviceForPush,
   type TaskNotificationData,
+  unregisterCurrentDeviceForPush,
 } from '@/src/features/notifications/push-notifications';
 
 export function PushNotificationBridge() {
@@ -18,10 +19,17 @@ export function PushNotificationBridge() {
   useEffect(() => {
     if (!user) return;
     void arePushNotificationsEnabled()
-      .then((enabled) => (enabled ? registerCurrentDeviceForPush() : null))
+      .then(async (enabled) => {
+        if (enabled) {
+          await registerCurrentDeviceForPush();
+        } else {
+          await unregisterCurrentDeviceForPush();
+        }
+      })
       .catch((cause) => {
-        // Registration cannot block sign-in, but keep a development breadcrumb.
-        if (__DEV__) console.warn('TaskGrid push registration failed', cause);
+        // Notification setup must never block sign-in. The underlying helper
+        // logs registration and unregistration failures with their real cause.
+        if (__DEV__) console.warn('TaskGrid notification setup could not finish', cause);
       });
   }, [user?.id]);
 

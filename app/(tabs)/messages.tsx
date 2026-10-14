@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Image, Modal, Pressable, StyleSheet, View } from 'react-native';
 
 import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
@@ -9,7 +9,11 @@ import { Button } from '@/src/components/ui/Button';
 import { Screen } from '@/src/components/ui/Screen';
 import { SkeletonBlock } from '@/src/components/ui/SkeletonLoader';
 import { chatApi, type Conversation, type ConversationPage } from '@/src/features/chat/chat-api';
-import { connectChatChannel, type ChatSocketState } from '@/src/features/chat/chat-socket';
+import {
+  connectChatChannel,
+  type ChatRealtimeEvent,
+  type ChatSocketState,
+} from '@/src/features/chat/chat-socket';
 import { ApiError } from '@/src/lib/api';
 import { radius, spacing, useAppTheme } from '@/src/theme';
 
@@ -25,6 +29,8 @@ export default function MessagesScreen() {
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [deletePromptVisible, setDeletePromptVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [typingTasks, setTypingTasks] = useState<Record<string, string>>({});
+  const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const load = useCallback(async (page = 0, quiet = false) => {
     if (!quiet) page === 0 ? setLoading(true) : setLoadingMore(true);
@@ -92,19 +98,55 @@ export default function MessagesScreen() {
         }
       };
 
+      const receive = (event: ChatRealtimeEvent) => {
+        if (disposed) return;
+        if (event.type !== 'TYPING_CHANGED') {
+          void load(0, true);
+          return;
+        }
+
+        const existingTimer = typingTimersRef.current[event.taskId];
+        if (existingTimer) clearTimeout(existingTimer);
+        if (!event.typing) {
+          setTypingTasks((current) => {
+            const next = { ...current };
+            delete next[event.taskId];
+            return next;
+          });
+          delete typingTimersRef.current[event.taskId];
+          return;
+        }
+
+        setTypingTasks((current) => ({
+          ...current,
+          [event.taskId]: event.userName ?? 'Someone',
+        }));
+        typingTimersRef.current[event.taskId] = setTimeout(() => {
+          setTypingTasks((current) => {
+            const next = { ...current };
+            delete next[event.taskId];
+            return next;
+          });
+          delete typingTimersRef.current[event.taskId];
+        }, 3_500);
+      };
+
       void load();
       void connectChatChannel('inbox', {
-        onEvent: () => void load(0, true),
+        onEvent: receive,
         onStateChange: socketStatus,
         onConnected: () => void load(0, true),
-      }).then((cleanup) => {
-        if (disposed) void cleanup();
-        else disconnect = cleanup;
+      }).then((connection) => {
+        if (disposed) void connection.disconnect();
+        else disconnect = () => connection.disconnect();
       });
 
       return () => {
         disposed = true;
         if (fallbackTimer) clearInterval(fallbackTimer);
+        Object.values(typingTimersRef.current).forEach(clearTimeout);
+        typingTimersRef.current = {};
+        setTypingTasks({});
         void disconnect?.();
       };
     }, [load]),
@@ -135,7 +177,10 @@ export default function MessagesScreen() {
               onPress={() => setDeletePromptVisible(true)}
               style={({ pressed }) => [
                 styles.deleteAction,
-                { backgroundColor: colors.dangerSoft, opacity: pressed ? 0.65 : 1 },
+                {
+                  backgroundColor: colors.dangerSoft,
+                  opacity: pressed ? 0.65 : 1,
+                },
               ]}
             >
               <Ionicons name="trash-outline" size={22} color={colors.danger} />
@@ -178,6 +223,7 @@ export default function MessagesScreen() {
             <ConversationRow
               key={conversation.taskId}
               conversation={conversation}
+              typingName={typingTasks[conversation.taskId]}
               bordered={index > 0}
               selected={selected?.taskId === conversation.taskId}
               onLongPress={() => setSelected(conversation)}
@@ -256,12 +302,14 @@ export default function MessagesScreen() {
 
 function ConversationRow({
   conversation,
+  typingName,
   bordered,
   selected,
   onPress,
   onLongPress,
 }: {
   conversation: Conversation;
+  typingName?: string;
   bordered: boolean;
   selected: boolean;
   onPress: () => void;
@@ -277,7 +325,10 @@ function ConversationRow({
       delayLongPress={320}
       style={({ pressed }) => [
         styles.row,
-        bordered && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
+        bordered && {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.divider,
+        },
         selected && { backgroundColor: colors.primarySoft },
         { opacity: pressed ? 0.72 : 1 },
       ]}
@@ -304,8 +355,15 @@ function ConversationRow({
           {conversation.taskTitle}
         </AppText>
         <View style={styles.previewRow}>
-          <AppText color={colors.textSecondary} numberOfLines={1} style={styles.preview}>
-            {conversation.lastMessage ?? 'Start the conversation'}
+          <AppText
+            color={typingName ? colors.primary : colors.textSecondary}
+            variant={typingName ? 'bodyMedium' : undefined}
+            numberOfLines={1}
+            style={styles.preview}
+          >
+            {typingName
+              ? `${typingName} is typing...`
+              : (conversation.lastMessage ?? 'Start the conversation')}
           </AppText>
           {conversation.unreadCount > 0 ? (
             <View style={[styles.unread, { backgroundColor: colors.primary }]}>
@@ -329,7 +387,10 @@ function shortTime(value: string) {
   const date = new Date(value);
   const now = new Date();
   if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString('en-NG', { hour: 'numeric', minute: '2-digit' });
+    return date.toLocaleTimeString('en-NG', {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   }
   return date.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
 }
@@ -354,8 +415,17 @@ function ConversationSkeleton() {
 const styles = StyleSheet.create({
   screen: { gap: spacing.xl, paddingTop: spacing.xl },
   header: { minHeight: 62, justifyContent: 'center', gap: spacing.xs },
-  selectionHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  selectionClose: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  selectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  selectionClose: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   selectionCopy: { flex: 1 },
   deleteAction: {
     width: 44,
@@ -424,7 +494,11 @@ const styles = StyleSheet.create({
   },
   promptTitle: { marginTop: spacing.xs },
   promptCopy: { lineHeight: 22 },
-  promptActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  promptActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
   promptButton: { flex: 1 },
   state: {
     flex: 1,

@@ -1,5 +1,5 @@
-import { File, UploadType } from 'expo-file-system';
-import { Platform } from 'react-native';
+import { File, UploadType } from "expo-file-system";
+import { Platform } from "react-native";
 
 import type {
   AccountType,
@@ -14,9 +14,17 @@ import type {
   WorkerProfile,
   TaskSummary,
   SupportOptions,
-} from '@/src/features/auth/types';
-import type { KycSession, KycStatusResult } from '@/src/features/kyc/types';
-import { clearSessionTokens, getSessionTokens, saveSessionTokens } from '@/src/lib/token-storage';
+} from "@/src/features/auth/types";
+import type { KycSession, KycStatusResult } from "@/src/features/kyc/types";
+import {
+  invalidateCachedQueries,
+  readThroughCache,
+} from "@/src/lib/query-cache";
+import {
+  clearSessionTokens,
+  getSessionTokens,
+  saveSessionTokens,
+} from "@/src/lib/token-storage";
 
 type ApiResponse<T> = {
   code: number;
@@ -25,16 +33,22 @@ type ApiResponse<T> = {
   isSuccess: boolean;
 };
 
-type ApiOptions = Omit<RequestInit, 'body'> & {
+type ApiOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
   authenticated?: boolean;
   retryAfterRefresh?: boolean;
   timeoutMs?: number;
 };
 
+type ApiCacheOptions<T> = {
+  ttlMs: number | ((value: T) => number);
+  forceRefresh?: boolean;
+  key?: string;
+};
+
 const localApiUrl = Platform.select({
-  android: 'http://10.0.2.2:8080/api/v1',
-  default: 'http://localhost:8080/api/v1',
+  android: "http://10.0.2.2:8080/api/v1",
+  default: "http://localhost:8080/api/v1",
 });
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? localApiUrl;
@@ -42,9 +56,12 @@ export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? localApiUrl;
 const API_REQUEST_TIMEOUT_MS = 10_000;
 const IMAGE_UPLOAD_TIMEOUT_MS = 60_000;
 
-const CONNECTION_ERROR_MESSAGE = "We couldn't connect right now. Please try again.";
-const TIMEOUT_ERROR_MESSAGE = 'This is taking longer than expected. Please try again in a moment.';
-const RESPONSE_ERROR_MESSAGE = "We couldn't complete that request. Please try again.";
+const CONNECTION_ERROR_MESSAGE =
+  "We couldn't connect right now. Please try again.";
+const TIMEOUT_ERROR_MESSAGE =
+  "This is taking longer than expected. Please try again in a moment.";
+const RESPONSE_ERROR_MESSAGE =
+  "We couldn't complete that request. Please try again.";
 const PHOTO_UPLOAD_ERROR_MESSAGE =
   "We couldn't upload that photo. Check your connection and try again.";
 
@@ -54,7 +71,7 @@ export class ApiError extends Error {
     public readonly code: number,
   ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
@@ -110,20 +127,20 @@ type ImageUploadResult<T> = {
 
 async function uploadImageRequest<T>(
   path: string,
-  method: 'POST' | 'PUT',
+  method: "POST" | "PUT",
   image: LocalProfileImage,
   headers: Record<string, string> = {},
 ): Promise<ImageUploadResult<T>> {
   try {
-    if (Platform.OS === 'web') {
+    if (Platform.OS === "web") {
       const form = new FormData();
       const imageResponse = await fetch(image.uri);
-      form.append('file', await imageResponse.blob(), image.fileName);
+      form.append("file", await imageResponse.blob(), image.fileName);
       const response = await fetchWithTimeout(
         `${API_BASE_URL}${path}`,
         {
           method,
-          headers: { Accept: 'application/json', ...headers },
+          headers: { Accept: "application/json", ...headers },
           body: form,
         },
         IMAGE_UPLOAD_TIMEOUT_MS,
@@ -143,14 +160,17 @@ async function uploadImageRequest<T>(
     }, IMAGE_UPLOAD_TIMEOUT_MS);
 
     try {
-      const result = await new File(image.uri).upload(`${API_BASE_URL}${path}`, {
-        httpMethod: method,
-        uploadType: UploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType: image.mimeType,
-        headers: { Accept: 'application/json', ...headers },
-        signal: controller.signal,
-      });
+      const result = await new File(image.uri).upload(
+        `${API_BASE_URL}${path}`,
+        {
+          httpMethod: method,
+          uploadType: UploadType.MULTIPART,
+          fieldName: "file",
+          mimeType: image.mimeType,
+          headers: { Accept: "application/json", ...headers },
+          signal: controller.signal,
+        },
+      );
       return {
         status: result.status,
         ok: result.status >= 200 && result.status < 300,
@@ -172,11 +192,14 @@ async function refreshAccessToken() {
   const current = await getSessionTokens();
   if (!current?.refreshToken) return false;
 
-  const response = await fetchWithTimeout(`${API_BASE_URL}/auth/refresh-token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken: current.refreshToken }),
-  });
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/auth/refresh-token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: current.refreshToken }),
+    },
+  );
   const payload = await readPayload<TokenResponse>(response);
   if (!response.ok || !payload.isSuccess) {
     await clearSessionTokens();
@@ -189,7 +212,10 @@ async function refreshAccessToken() {
 
 let refreshPromise: Promise<boolean> | null = null;
 
-export async function apiRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
+export async function apiRequest<T>(
+  path: string,
+  options: ApiOptions = {},
+): Promise<T> {
   const {
     body,
     authenticated = false,
@@ -206,10 +232,12 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
       {
         ...requestOptions,
         headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
+          Accept: "application/json",
+          "Content-Type": "application/json",
           ...headers,
-          ...(tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {}),
+          ...(tokens?.accessToken
+            ? { Authorization: `Bearer ${tokens.accessToken}` }
+            : {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       },
@@ -231,70 +259,149 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
 
   const payload = await readPayload<T>(response);
   if (!response.ok || !payload.isSuccess) {
-    throw new ApiError(payload.message || 'Something went wrong. Please try again.', payload.code);
+    throw new ApiError(
+      payload.message || "Something went wrong. Please try again.",
+      payload.code,
+    );
   }
+  invalidateAfterMutation(path, requestOptions.method);
   return payload.data;
+}
+
+export async function cachedApiRequest<T>(
+  path: string,
+  cache: ApiCacheOptions<T>,
+  options: ApiOptions = {},
+): Promise<T> {
+  const tokens = options.authenticated ? await getSessionTokens() : null;
+  const accountScope = options.authenticated
+    ? `account-${fingerprint(tokens?.accessToken ?? "signed-out")}`
+    : "public";
+  const key = `${accountScope}::${cache.key ?? path}`;
+  return readThroughCache(
+    key,
+    cache.ttlMs,
+    () => apiRequest<T>(path, options),
+    cache.forceRefresh,
+  );
+}
+
+export function invalidateApiCache(...pathFragments: string[]) {
+  invalidateCachedQueries(...pathFragments);
+}
+
+function fingerprint(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function invalidateAfterMutation(path: string, method?: string) {
+  const verb = (method ?? "GET").toUpperCase();
+  if (verb === "GET" || verb === "HEAD" || path === "/locations/me") return;
+
+  if (
+    path.startsWith("/tasks") ||
+    path.startsWith("/payments/tasks") ||
+    path.startsWith("/locations/tasks") ||
+    path.includes("/dispute")
+  ) {
+    invalidateCachedQueries("/tasks", "/discovery/recommended-tasks");
+  }
+  if (path.startsWith("/reviews") || path.includes("/review")) {
+    invalidateCachedQueries(
+      "/reviews",
+      "/tasks",
+      "/discovery/recommended-workers",
+    );
+  }
+  if (path.startsWith("/profile") || path.startsWith("/kyc")) {
+    invalidateCachedQueries("/tasks", "/discovery/recommended-workers");
+  }
+  if (path === "/auth/logout") invalidateCachedQueries();
 }
 
 export const authApi = {
   register(accountType: AccountType, body: RegisterPayload) {
     return apiRequest<User>(`/auth/register?accountType=${accountType}`, {
-      method: 'POST',
+      method: "POST",
       body,
     });
   },
   login(email: string, password: string) {
-    return apiRequest<TokenResponse>('/auth/login', {
-      method: 'POST',
+    return apiRequest<TokenResponse>("/auth/login", {
+      method: "POST",
       body: { email, password },
     });
   },
   verifyEmail(token: string) {
-    return apiRequest<User>('/auth/verify-email', { method: 'POST', body: { token } });
+    return apiRequest<User>("/auth/verify-email", {
+      method: "POST",
+      body: { token },
+    });
   },
   resendVerification(email: string) {
-    return apiRequest<null>('/auth/resend-verification', { method: 'POST', body: { email } });
+    return apiRequest<null>("/auth/resend-verification", {
+      method: "POST",
+      body: { email },
+    });
   },
   forgotPassword(email: string) {
-    return apiRequest<null>('/auth/forgot-password', { method: 'POST', body: { email } });
+    return apiRequest<null>("/auth/forgot-password", {
+      method: "POST",
+      body: { email },
+    });
   },
   resetPassword(token: string, newPassword: string, confirmPassword: string) {
-    return apiRequest<null>('/auth/reset-password', {
-      method: 'POST',
+    return apiRequest<null>("/auth/reset-password", {
+      method: "POST",
       body: { token, newPassword, confirmPassword },
     });
   },
   me() {
-    return apiRequest<User>('/auth/me', { authenticated: true });
+    return apiRequest<User>("/auth/me", { authenticated: true });
   },
-  changePassword(currentPassword: string, newPassword: string, confirmPassword: string) {
-    return apiRequest<null>('/auth/change-password', {
-      method: 'POST',
+  changePassword(
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) {
+    return apiRequest<null>("/auth/change-password", {
+      method: "POST",
       body: { currentPassword, newPassword, confirmPassword },
       authenticated: true,
     });
   },
   logout(refreshToken: string) {
-    return apiRequest<null>('/auth/logout', { method: 'POST', body: { refreshToken } });
+    return apiRequest<null>("/auth/logout", {
+      method: "POST",
+      body: { refreshToken },
+    });
   },
 };
 
 export const skillsApi = {
-  list() {
-    return apiRequest<Skill[]>('/skills');
+  list(forceRefresh = false) {
+    return cachedApiRequest<Skill[]>("/skills", {
+      ttlMs: 6 * 60 * 60 * 1_000,
+      forceRefresh,
+    });
   },
 };
 
 export const mediaApi = {
   async uploadProfileImage(image: LocalProfileImage) {
     const result = await uploadImageRequest<ProfileImageUpload>(
-      '/media/profile-image',
-      'POST',
+      "/media/profile-image",
+      "POST",
       image,
     );
     if (!result.ok || !result.payload.isSuccess) {
       throw new ApiError(
-        result.payload.message || 'The profile image could not be uploaded.',
+        result.payload.message || "The profile image could not be uploaded.",
         result.payload.code,
       );
     }
@@ -308,68 +415,112 @@ export async function uploadAuthenticatedImage<T>(
   retry = true,
 ): Promise<T> {
   const tokens = await getSessionTokens();
-  const result = await uploadImageRequest<T>(path, 'POST', image, {
-    ...(tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {}),
+  const result = await uploadImageRequest<T>(path, "POST", image, {
+    ...(tokens?.accessToken
+      ? { Authorization: `Bearer ${tokens.accessToken}` }
+      : {}),
   });
   if (result.status === 401 && retry && (await refreshAccessToken()))
     return uploadAuthenticatedImage<T>(path, image, false);
   if (!result.ok || !result.payload.isSuccess)
     throw new ApiError(
-      result.payload.message || 'The image could not be uploaded.',
+      result.payload.message || "The image could not be uploaded.",
       result.payload.code,
     );
+  invalidateAfterMutation(path, "POST");
   return result.payload.data;
 }
 
-async function sendProfileImage(image: LocalProfileImage, retry = true): Promise<User> {
+async function sendProfileImage(
+  image: LocalProfileImage,
+  retry = true,
+): Promise<User> {
   if (image.fileSize && image.fileSize > 5 * 1024 * 1024) {
-    throw new ApiError('The profile picture must be 5 MB or smaller.', 413);
+    throw new ApiError("The profile picture must be 5 MB or smaller.", 413);
   }
   const tokens = await getSessionTokens();
-  const result = await uploadImageRequest<User>('/profile/picture', 'PUT', image, {
-    ...(tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {}),
-  });
+  const result = await uploadImageRequest<User>(
+    "/profile/picture",
+    "PUT",
+    image,
+    {
+      ...(tokens?.accessToken
+        ? { Authorization: `Bearer ${tokens.accessToken}` }
+        : {}),
+    },
+  );
   if (result.status === 401 && retry && (await refreshAccessToken()))
     return sendProfileImage(image, false);
   if (!result.ok || !result.payload.isSuccess)
     throw new ApiError(
-      result.payload.message || 'The profile picture could not be updated.',
+      result.payload.message || "The profile picture could not be updated.",
       result.payload.code,
     );
+  invalidateCachedQueries("/tasks", "/discovery/recommended-workers");
   return result.payload.data;
 }
 
 export const profileApi = {
   worker() {
-    return apiRequest<WorkerProfile>('/profile/worker', { authenticated: true });
+    return apiRequest<WorkerProfile>("/profile/worker", {
+      authenticated: true,
+    });
   },
   update(body: UpdateProfilePayload) {
-    return apiRequest<User>('/profile', { method: 'PATCH', body, authenticated: true });
+    return apiRequest<User>("/profile", {
+      method: "PATCH",
+      body,
+      authenticated: true,
+    });
   },
   replacePicture(image: LocalProfileImage) {
     return sendProfileImage(image);
   },
   removePicture() {
-    return apiRequest<User>('/profile/picture', { method: 'DELETE', authenticated: true });
+    return apiRequest<User>("/profile/picture", {
+      method: "DELETE",
+      authenticated: true,
+    });
   },
 };
 
 export const discoveryApi = {
-  workers() {
-    return apiRequest<WorkerSummary[]>('/discovery/recommended-workers', { authenticated: true });
+  workers(forceRefresh = false) {
+    return cachedApiRequest<WorkerSummary[]>(
+      "/discovery/recommended-workers",
+      {
+        ttlMs: 2 * 60 * 1_000,
+        forceRefresh,
+      },
+      { authenticated: true },
+    );
   },
-  tasks() {
-    return apiRequest<TaskSummary[]>('/discovery/recommended-tasks', { authenticated: true });
+  tasks(forceRefresh = false) {
+    return cachedApiRequest<TaskSummary[]>(
+      "/discovery/recommended-tasks",
+      {
+        ttlMs: 30 * 1_000,
+        forceRefresh,
+      },
+      { authenticated: true },
+    );
   },
 };
 
 export const supportApi = {
-  options() {
-    return apiRequest<SupportOptions>('/support/options', { authenticated: true });
+  options(forceRefresh = false) {
+    return cachedApiRequest<SupportOptions>(
+      "/support/options",
+      {
+        ttlMs: 24 * 60 * 60 * 1_000,
+        forceRefresh,
+      },
+      { authenticated: true },
+    );
   },
   contact(subject: string, message: string) {
-    return apiRequest<null>('/support/contact', {
-      method: 'POST',
+    return apiRequest<null>("/support/contact", {
+      method: "POST",
       body: { subject, message },
       authenticated: true,
     });
@@ -378,23 +529,23 @@ export const supportApi = {
 
 export const kycApi = {
   startSession() {
-    return apiRequest<KycSession>('/kyc/session', {
-      method: 'POST',
+    return apiRequest<KycSession>("/kyc/session", {
+      method: "POST",
       authenticated: true,
     });
   },
   status() {
-    return apiRequest<KycStatusResult>('/kyc/status', { authenticated: true });
+    return apiRequest<KycStatusResult>("/kyc/status", { authenticated: true });
   },
   sync() {
-    return apiRequest<KycStatusResult>('/kyc/sync', {
-      method: 'POST',
+    return apiRequest<KycStatusResult>("/kyc/sync", {
+      method: "POST",
       authenticated: true,
     });
   },
   appeal(reason: string) {
-    return apiRequest<KycStatusResult>('/kyc/appeal', {
-      method: 'POST',
+    return apiRequest<KycStatusResult>("/kyc/appeal", {
+      method: "POST",
       body: { reason },
       authenticated: true,
     });

@@ -72,14 +72,18 @@ export default function ProfileScreen() {
             },
           ],
         );
-      } else if (!result.enabled && enabled) {
+      } else if (result.enabled && result.registration === 'pending') {
         Alert.alert(
-          'Notifications could not be enabled',
-          'Check your connection and try again. Your other app features will continue to work.',
+          'Notification preference saved',
+          result.reason === 'permission-pending'
+            ? 'Notification permission was not granted yet. You can try again from this switch.'
+            : 'This device could not be registered right now. TaskGrid will try again automatically after your next sign-in.',
         );
       }
-    } catch {
-      setNotificationsEnabled(!enabled);
+    } catch (cause) {
+      const savedPreference = await arePushNotificationsEnabled().catch(() => !enabled);
+      setNotificationsEnabled(savedPreference);
+      console.warn('[TaskGrid push] Preference could not be saved', cause);
       Alert.alert('Could not save this setting', 'Check your connection and try again.');
     } finally {
       setSavingNotifications(false);

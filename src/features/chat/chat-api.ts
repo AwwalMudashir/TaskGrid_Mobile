@@ -60,6 +60,12 @@ export const chatApi = {
       authenticated: true,
     });
   },
+  deleteMessage(taskId: string, messageId: string) {
+    return apiRequest<void>(`/chat/tasks/${taskId}/messages/${messageId}`, {
+      method: 'DELETE',
+      authenticated: true,
+    });
+  },
   markRead(taskId: string) {
     return apiRequest<ChatReadResult>(`/chat/tasks/${taskId}/read`, {
       method: 'POST',

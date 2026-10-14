@@ -14,7 +14,7 @@ import { spacing, useAppTheme } from '@/src/theme';
 type State = 'idle' | 'loading' | 'success' | 'error';
 
 export default function VerifyEmailScreen() {
-  const params = useLocalSearchParams<{ token?: string }>();
+  const params = useLocalSearchParams<{ token?: string; status?: string }>();
   const router = useRouter();
   const { colors } = useAppTheme();
   const [token, setToken] = useState(typeof params.token === 'string' ? params.token : '');
@@ -44,13 +44,30 @@ export default function VerifyEmailScreen() {
   }
 
   useEffect(() => {
+    if (params.status === 'success') {
+      attempted.current = true;
+      setState('success');
+      return;
+    }
+
+    if (params.status === 'invalid') {
+      attempted.current = true;
+      setState('error');
+      setMessage(
+        'This verification link is invalid or has expired. Request a new link and try again.',
+      );
+      return;
+    }
+
     if (params.token && !attempted.current) {
       attempted.current = true;
       verify(params.token);
     }
-  }, [params.token]);
+  }, [params.status, params.token]);
 
   const success = state === 'success';
+  const hasVerificationResult = params.status === 'success' || params.status === 'invalid';
+  const returnToSignIn = state === 'error' && hasVerificationResult;
   return (
     <Screen keyboard contentStyle={styles.screen}>
       <AuthArtwork name="email" width={170} height={170} />
@@ -67,7 +84,7 @@ export default function VerifyEmailScreen() {
           {message}
         </NoticeCard>
       ) : null}
-      {!params.token && !success ? (
+      {!params.token && !hasVerificationResult && !success ? (
         <TextField
           label="Verification token"
           placeholder="Paste the token from your email"
@@ -77,8 +94,10 @@ export default function VerifyEmailScreen() {
         />
       ) : null}
       <Button
-        label={success ? 'Continue to sign in' : 'Verify email'}
-        onPress={success ? () => router.replace('/(auth)/login') : () => verify()}
+        label={
+          success ? 'Continue to sign in' : returnToSignIn ? 'Return to sign in' : 'Verify email'
+        }
+        onPress={success || returnToSignIn ? () => router.replace('/(auth)/login') : () => verify()}
         loading={state === 'loading'}
       />
     </Screen>
