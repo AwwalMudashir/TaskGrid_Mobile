@@ -171,14 +171,6 @@ export default function ProfileScreen() {
           subtitle="Update your account password securely"
           onPress={() => router.push('/(tabs)/profile/change-password')}
         />
-        {user?.role === 'CLIENT' ? (
-          <SettingsRow
-            icon="star-outline"
-            title="My reviews"
-            subtitle="See your rating and feedback from workers"
-            onPress={() => router.push('/(tabs)/profile/reviews' as never)}
-          />
-        ) : null}
         {user?.role === 'RUNNER' ? (
           <>
             <SettingsRow
@@ -186,6 +178,12 @@ export default function ProfileScreen() {
               title="Worker profile"
               subtitle="Your skills, work status, rating and reviews"
               onPress={() => router.push('/(tabs)/profile/worker-profile' as never)}
+            />
+            <SettingsRow
+              icon="options-outline"
+              title="Task recommendations"
+              subtitle="Choose how closely open tasks should match you"
+              onPress={() => router.push('/(tabs)/profile/recommendations' as never)}
             />
             <SettingsRow
               icon="shield-checkmark-outline"

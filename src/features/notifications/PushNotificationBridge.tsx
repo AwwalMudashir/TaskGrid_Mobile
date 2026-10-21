@@ -55,6 +55,17 @@ export function PushNotificationBridge() {
       router.push({ pathname: '/task/[id]/chat', params: { id: data.taskId } } as never);
       return;
     }
+    if (data?.taskId && data.reminderId) {
+      router.push({
+        pathname: '/task/[id]',
+        params: {
+          id: data.taskId,
+          reminderId: data.reminderId,
+          reminderType: data.reminderType,
+        },
+      });
+      return;
+    }
     if (data?.taskId) {
       router.push({ pathname: '/task/[id]', params: { id: data.taskId } });
     }

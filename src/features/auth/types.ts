@@ -90,6 +90,16 @@ export type WorkerSummary = {
   totalJobs: number;
   identityVerified: boolean;
   completionRate: number | null;
+  distanceKm: number | null;
+  recommendationScore: number;
+  recommendationExplanation: string;
+  recommendationSource: 'AI_ASSISTED' | 'DETERMINISTIC';
+};
+
+export type WorkerRecommendations = {
+  taskId: string | null;
+  taskTitle: string | null;
+  workers: WorkerSummary[];
 };
 
 export type WorkerProfile = {
@@ -106,6 +116,13 @@ export type WorkerProfile = {
   completedJobs: number;
 };
 
+export type RecommendationPreference = {
+  minimumScore: number;
+  minimumAllowed: number;
+  maximumAllowed: number;
+  explanation: string;
+};
+
 export type TaskSummary = {
   id: string;
   title: string;
@@ -114,6 +131,11 @@ export type TaskSummary = {
   budget: number | null;
   scheduledStartAt: string | null;
   urgencyLevel: 'LOW' | 'NORMAL' | 'HIGH' | 'EMERGENCY';
+  distanceKm: number | null;
+  estimatedTravelMinutes: number | null;
+  recommendationScore: number;
+  recommendationExplanation: string;
+  recommendationSource: 'AI_ASSISTED' | 'DETERMINISTIC';
 };
 
 export type SupportOptions = { email: string; phoneNumber: string | null };

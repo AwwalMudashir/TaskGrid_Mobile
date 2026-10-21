@@ -4,7 +4,7 @@ import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
-import { radius, spacing, useAppTheme } from '@/src/theme';
+import { spacing, useAppTheme } from '@/src/theme';
 
 type AuthHeaderProps = {
   title: string;
@@ -35,10 +35,11 @@ export function AuthHeader({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Go back"
+          hitSlop={8}
           onPress={onBackPress ?? (() => router.back())}
-          style={[styles.icon, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          style={({ pressed }) => [styles.icon, { opacity: pressed ? 0.45 : 1 }]}
         >
-          <Ionicons name="arrow-back" size={21} color={colors.brandDark} />
+          <Ionicons name="arrow-back" size={24} color={colors.brandDark} />
         </Pressable>
       ) : null}
       <View style={styles.copy}>
@@ -85,8 +86,6 @@ const styles = StyleSheet.create({
   icon: {
     width: 42,
     height: 42,
-    borderRadius: radius.md,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

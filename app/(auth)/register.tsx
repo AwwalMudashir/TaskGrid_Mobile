@@ -421,10 +421,7 @@ export default function RegisterScreen() {
               style={({ pressed }) => [
                 styles.backAction,
                 {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.border,
-                  opacity: pressed ? 0.78 : 1,
-                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                  opacity: pressed ? 0.45 : 1,
                 },
               ]}
             >
@@ -733,8 +730,6 @@ const styles = StyleSheet.create({
   backAction: {
     width: 54,
     height: 54,
-    borderRadius: radius.pill,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

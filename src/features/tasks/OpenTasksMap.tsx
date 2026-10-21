@@ -1,6 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Camera, Map, Marker } from '@maplibre/maplibre-react-native';
-import { useState } from 'react';
+import {
+  Camera,
+  GeoJSONSource,
+  Layer,
+  Map,
+  Marker,
+} from '@maplibre/maplibre-react-native';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { OPEN_STREET_MAP_STYLE } from '@/src/components/home/WorkerLocationMap';
@@ -18,8 +24,28 @@ export function OpenTasksMap({
   onSelect(task: TaskCard): void;
 }) {
   const { colors } = useAppTheme();
-  const [selected, setSelected] = useState<TaskCard | null>(null);
-  const mappedTasks = tasks.filter((task) => task.mapLatitude != null && task.mapLongitude != null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const mappedTasks = useMemo(
+    () => tasks.filter((task) => task.mapLatitude != null && task.mapLongitude != null),
+    [tasks],
+  );
+  const selected = mappedTasks.find((task) => task.id === selectedId) ?? null;
+  const taskHitAreas = useMemo<
+    GeoJSON.FeatureCollection<GeoJSON.Point, { taskId: string }>
+  >(
+    () => ({
+      type: 'FeatureCollection',
+      features: mappedTasks.map((task) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [task.mapLongitude!, task.mapLatitude!],
+        },
+        properties: { taskId: task.id },
+      })),
+    }),
+    [mappedTasks],
+  );
   const first = mappedTasks[0];
   const centre: [number, number] = workerLocation
     ? [workerLocation.longitude, workerLocation.latitude]
@@ -62,6 +88,28 @@ export function OpenTasksMap({
             </View>
           </Marker>
         ) : null}
+        {mappedTasks.length > 0 ? (
+          <GeoJSONSource
+            id="open-task-touch-targets"
+            data={taskHitAreas}
+            hitbox={{ top: 16, right: 16, bottom: 16, left: 16 }}
+            onPress={(event) => {
+              event.stopPropagation();
+              const taskId = event.nativeEvent.features[0]?.properties?.taskId;
+              if (typeof taskId === 'string') setSelectedId(taskId);
+            }}
+          >
+            <Layer
+              id="open-task-touch-layer"
+              type="circle"
+              paint={{
+                'circle-radius': 28,
+                'circle-color': colors.primary,
+                'circle-opacity': 0.01,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
         {mappedTasks.map((task) => (
           <Marker
             key={task.id}
@@ -71,10 +119,20 @@ export function OpenTasksMap({
             accessible
             accessibilityRole="button"
             accessibilityLabel={`Preview ${task.title}`}
-            onPress={() => setSelected(task)}
+            onPress={(event) => {
+              event.stopPropagation();
+              setSelectedId(task.id);
+            }}
           >
-            <View
+            <Pressable
               collapsable={false}
+              accessibilityRole="button"
+              accessibilityLabel={`Preview ${task.title}`}
+              hitSlop={8}
+              onPress={(event) => {
+                event.stopPropagation();
+                setSelectedId(task.id);
+              }}
               style={[
                 styles.taskMarkerHalo,
                 {
@@ -91,12 +149,27 @@ export function OpenTasksMap({
               >
                 <Ionicons name="briefcase" size={17} color={colors.textOnPrimary} />
               </View>
-            </View>
+            </Pressable>
           </Marker>
         ))}
       </Map>
 
-      {selected ? (
+      {mappedTasks.length === 0 ? (
+        <View pointerEvents="none" style={styles.emptyStatePosition}>
+          <View style={[styles.emptyState, { backgroundColor: colors.surface }]}>
+            <View style={[styles.emptyMarker, { backgroundColor: colors.primarySoft }]}>
+              <Ionicons name="map-outline" size={25} color={colors.primary} />
+            </View>
+            <AppText variant="subtitle">No open tasks in this area</AppText>
+            <AppText color={colors.textSecondary} style={styles.emptyCopy}>
+              Try a wider search distance or check again when new tasks are posted.
+            </AppText>
+          </View>
+          <AppText variant="caption" color={colors.textMuted} style={styles.attribution}>
+            © OpenStreetMap contributors
+          </AppText>
+        </View>
+      ) : selected ? (
         <View style={[styles.preview, { backgroundColor: colors.surface }]}>
           <View style={styles.previewCopy}>
             <AppText variant="caption" color={colors.primary}>
@@ -195,4 +268,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  emptyStatePosition: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  emptyState: {
+    width: '100%',
+    maxWidth: 310,
+    alignItems: 'center',
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    gap: spacing.sm,
+    elevation: 4,
+  },
+  emptyMarker: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  emptyCopy: { textAlign: 'center' },
+  attribution: { position: 'absolute', bottom: spacing.md },
 });

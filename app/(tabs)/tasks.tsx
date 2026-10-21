@@ -1,36 +1,59 @@
-import Ionicons from "@expo/vector-icons/Ionicons";
-import * as Location from "expo-location";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import Ionicons from '@expo/vector-icons/Ionicons';
+import DateTimePicker, {
+  DateTimePickerAndroid,
+  type DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
+import * as Location from 'expo-location';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { AnimatedEntrance } from "@/src/components/ui/AnimatedEntrance";
-import { AppText } from "@/src/components/ui/AppText";
-import { Button } from "@/src/components/ui/Button";
-import { Screen } from "@/src/components/ui/Screen";
-import { SurfaceCard } from "@/src/components/ui/SurfaceCard";
-import { TaskListSkeleton } from "@/src/components/ui/SkeletonLoader";
-import { useAuth } from "@/src/features/auth/AuthContext";
-import { OpenTasksMap } from "@/src/features/tasks/OpenTasksMap";
+import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
+import { AppText } from '@/src/components/ui/AppText';
+import { Button } from '@/src/components/ui/Button';
+import { Screen } from '@/src/components/ui/Screen';
+import { SurfaceCard } from '@/src/components/ui/SurfaceCard';
+import { TaskListSkeleton } from '@/src/components/ui/SkeletonLoader';
+import { useAuth } from '@/src/features/auth/AuthContext';
+import { OpenTasksMap } from '@/src/features/tasks/OpenTasksMap';
 import {
   taskApi,
   type Coordinates,
   type TaskCard as TaskCardData,
-} from "@/src/features/tasks/task-api";
-import { ApiError } from "@/src/lib/api";
-import { radius, spacing, useAppTheme } from "@/src/theme";
+} from '@/src/features/tasks/task-api';
+import { ApiError } from '@/src/lib/api';
+import { radius, spacing, useAppTheme } from '@/src/theme';
 
-type TaskTab = "mine" | "open";
-type OpenView = "list" | "map";
-type MineView = "current" | "previous";
+type TaskTab = 'mine' | 'open';
+type OpenView = 'list' | 'map';
+type MineView = 'current' | 'previous';
+type DateRange = { from: Date | null; to: Date | null };
+type DateField = 'from' | 'to';
+
+function apiDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function displayDate(date: Date | null) {
+  return date
+    ? date.toLocaleDateString('en-NG', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    : 'Any date';
+}
 
 function money(amount: number | null) {
   return amount == null
-    ? "Price to agree"
-    : `₦${amount.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    ? 'Price to agree'
+    : `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-type StageTone = "primary" | "info" | "warning" | "success" | "muted";
+type StageTone = 'primary' | 'info' | 'warning' | 'success' | 'muted';
 type TaskStage = {
   eyebrow: string;
   title: string;
@@ -39,200 +62,257 @@ type TaskStage = {
   tone: StageTone;
 };
 
-function taskStage(
-  task: TaskCardData,
-  isWorker: boolean,
-  board: TaskTab,
-): TaskStage {
-  const client = task.clientFirstName || "The client";
-  const worker = task.assignedRunnerFirstName || "Your worker";
+function taskStage(task: TaskCardData, isWorker: boolean, board: TaskTab): TaskStage {
+  const client = task.clientFirstName || 'The client';
+  const worker = task.assignedRunnerFirstName || 'Your worker';
 
-  if (task.status === "CANCELLED" || task.paymentStatus === "CANCELLED")
+  if (task.status === 'CANCELLED' || task.paymentStatus === 'CANCELLED')
     return {
-      eyebrow: "TASK CLOSED",
-      title: "This task was cancelled",
-      detail: "Open the task to review its final status.",
+      eyebrow: 'TASK CLOSED',
+      title: 'This task was cancelled',
+      detail: 'Open the task to review its final status.',
       step: 1,
-      tone: "muted",
+      tone: 'muted',
     };
-  if (task.status === "DISPUTED" || task.paymentStatus === "DISPUTED")
+  if (task.status === 'DISPUTED' || task.paymentStatus === 'DISPUTED')
     return {
-      eyebrow: "SUPPORT REVIEW",
-      title: isWorker ? "Your earnings are frozen" : "Your payment is frozen",
+      eyebrow: 'SUPPORT REVIEW',
+      title: isWorker ? 'Your earnings are frozen' : 'Your payment is frozen',
       detail: isWorker
-        ? "The disputed amount cannot enter your wallet until TaskGrid resolves the case."
-        : "The amount cannot be released to the worker while TaskGrid reviews the case.",
+        ? 'The disputed amount cannot enter your wallet until TaskGrid resolves the case.'
+        : 'The amount cannot be released to the worker while TaskGrid reviews the case.',
       step: 4,
-      tone: "warning",
+      tone: 'warning',
     };
-  if (task.paymentStatus === "REFUNDED")
+  if (task.paymentStatus === 'REFUNDED')
     return {
-      eyebrow: "PAYMENT RETURNED",
-      title: isWorker ? "The client was refunded" : "Your payment was refunded",
+      eyebrow: 'PAYMENT RETURNED',
+      title: isWorker ? 'The client was refunded' : 'Your payment was refunded',
       detail: isWorker
-        ? "The case was resolved with the payment returned to the client."
-        : "The resolved amount was returned to your original payment method.",
+        ? 'The case was resolved with the payment returned to the client.'
+        : 'The resolved amount was returned to your original payment method.',
       step: 4,
-      tone: "info",
+      tone: 'info',
     };
-  if (task.status === "PAID" || task.paymentStatus === "RELEASED")
+  if (task.status === 'PAID' || task.paymentStatus === 'RELEASED')
     return {
-      eyebrow: "TASK COMPLETE",
-      title: isWorker
-        ? `${client} approved your work`
-        : `You approved ${worker}’s work`,
+      eyebrow: 'TASK COMPLETE',
+      title: isWorker ? `${client} approved your work` : `You approved ${worker}’s work`,
       detail: isWorker
-        ? "Your earnings are now available in your wallet."
-        : "Payment has been released to the worker.",
+        ? 'Your earnings are now available in your wallet.'
+        : 'Payment has been released to the worker.',
       step: 4,
-      tone: "success",
+      tone: 'success',
     };
-  if (task.status === "COMPLETED" || task.paymentStatus === "COMPLETED")
+  if (task.status === 'COMPLETED' || task.paymentStatus === 'COMPLETED')
     return {
-      eyebrow: "COMPLETION REVIEW",
-      title: isWorker
-        ? `Waiting for ${client} to confirm`
-        : `${worker} marked this task complete`,
+      eyebrow: 'COMPLETION REVIEW',
+      title: isWorker ? `Waiting for ${client} to confirm` : `${worker} marked this task complete`,
       detail: isWorker
-        ? "Your evidence is under review. Earnings release after the deadline if no dispute is opened."
-        : "Review the evidence before the deadline. Approve the work or open a dispute.",
+        ? 'Your evidence is under review. Earnings release after the deadline if no dispute is opened.'
+        : 'Review the evidence before the deadline. Approve the work or open a dispute.',
       step: 4,
-      tone: "warning",
+      tone: 'warning',
     };
-  if (task.paymentStatus === "FAILED")
+  if (task.paymentStatus === 'FAILED')
     return {
-      eyebrow: "PAYMENT ATTENTION",
-      title: isWorker
-        ? `Waiting for ${client} to retry payment`
-        : "Payment needs your attention",
+      eyebrow: 'PAYMENT ATTENTION',
+      title: isWorker ? `Waiting for ${client} to retry payment` : 'Payment needs your attention',
       detail: isWorker
-        ? "Do not begin until the payment is confirmed."
-        : "Open the task to restart secure checkout.",
+        ? 'Do not begin until the payment is confirmed.'
+        : 'Open the task to restart secure checkout.',
       step: 2,
-      tone: "warning",
+      tone: 'warning',
     };
-  if (task.status === "ARRIVED")
+  if (task.status === 'ARRIVED')
     return {
-      eyebrow: "WORKER ARRIVED",
-      title: isWorker ? "You checked in at the task" : `${worker} has arrived`,
+      eyebrow: 'WORKER ARRIVED',
+      title: isWorker ? 'You checked in at the task' : `${worker} has arrived`,
       detail: isWorker
-        ? "Complete the work, then upload clear completion evidence."
-        : "Your worker checked in inside the task arrival area.",
+        ? 'Complete the work, then upload clear completion evidence.'
+        : 'Your worker checked in inside the task arrival area.',
       step: 3,
-      tone: "success",
+      tone: 'success',
     };
-  if (task.status === "EN_ROUTE")
+  if (task.status === 'EN_ROUTE')
     return {
-      eyebrow: "ON THE WAY",
-      title: isWorker
-        ? `You are travelling to ${client}`
-        : `${worker} is on the way`,
+      eyebrow: 'ON THE WAY',
+      title: isWorker ? `You are travelling to ${client}` : `${worker} is on the way`,
       detail: isWorker
-        ? "Keep TaskGrid open while you choose to share your foreground location."
-        : "Open the task to see the latest shared location.",
+        ? 'Keep TaskGrid open while you choose to share your foreground location.'
+        : 'Open the task to see the latest shared location.',
       step: 3,
-      tone: "info",
+      tone: 'info',
     };
-  if (task.paymentStatus === "HELD" || task.paymentStatus === "IN_PROGRESS")
+  if (task.paymentStatus === 'HELD' || task.paymentStatus === 'IN_PROGRESS')
     return {
-      eyebrow: "WORK IN PROGRESS",
-      title: isWorker
-        ? "Complete the task and submit proof"
-        : `${worker} is working on your task`,
+      eyebrow: 'WORK IN PROGRESS',
+      title: isWorker ? 'Complete the task and submit proof' : `${worker} is working on your task`,
       detail: isWorker
         ? `Your earnings are secured. ${client} will review your completion photos.`
-        : "Your payment is protected and has not been paid to the worker yet.",
+        : 'Your payment is protected and has not been paid to the worker yet.',
       step: 3,
-      tone: "primary",
+      tone: 'primary',
     };
-  if (
-    task.paymentStatus === "INITIALIZED" ||
-    task.paymentStatus === "PROCESSING"
-  )
+  if (task.paymentStatus === 'INITIALIZED' || task.paymentStatus === 'PROCESSING')
     return {
-      eyebrow: "PAYMENT CONFIRMATION",
-      title: isWorker
-        ? `Waiting for ${client}’s payment`
-        : "Finish payment to start the task",
+      eyebrow: 'PAYMENT CONFIRMATION',
+      title: isWorker ? `Waiting for ${client}’s payment` : 'Finish payment to start the task',
       detail: isWorker
-        ? "Begin only after TaskGrid confirms the payment is secured."
+        ? 'Begin only after TaskGrid confirms the payment is secured.'
         : `${worker} can begin once secure checkout is confirmed.`,
       step: 2,
-      tone: "info",
+      tone: 'info',
     };
-  if (task.status === "ACCEPTED") {
+  if (task.status === 'ACCEPTED') {
     if (isWorker && !task.assignedToViewer)
       return {
-        eyebrow: "APPLICATION CLOSED",
-        title: "Another worker was selected",
-        detail: "Keep exploring—new opportunities are added regularly.",
+        eyebrow: 'APPLICATION CLOSED',
+        title: 'Another worker was selected',
+        detail: 'Keep exploring—new opportunities are added regularly.',
         step: 2,
-        tone: "muted",
+        tone: 'muted',
       };
     return {
-      eyebrow: "PAYMENT NEXT",
-      title: isWorker
-        ? `Waiting for ${client} to pay`
-        : `${worker} is ready to begin`,
+      eyebrow: 'PAYMENT NEXT',
+      title: isWorker ? `Waiting for ${client} to pay` : `${worker} is ready to begin`,
       detail: isWorker
-        ? "Do not begin until TaskGrid confirms the payment."
-        : "Complete secure checkout so the worker can start.",
+        ? 'Do not begin until TaskGrid confirms the payment.'
+        : 'Complete secure checkout so the worker can start.',
       step: 2,
-      tone: "info",
+      tone: 'info',
     };
   }
-  if (task.status === "BID_RECEIVED")
+  if (task.status === 'BID_RECEIVED')
     return {
-      eyebrow: "APPLICATIONS",
+      eyebrow: 'APPLICATIONS',
       title: isWorker
-        ? board === "mine"
+        ? board === 'mine'
           ? `${client} is reviewing applications`
-          : "Applications are open"
-        : "Review your worker applications",
+          : 'Applications are open'
+        : 'Review your worker applications',
       detail: isWorker
-        ? board === "mine"
-          ? "You will see an update here when the client decides."
-          : "You can still apply while the task remains open."
-        : "Compare prices, arrival times and worker profiles.",
+        ? board === 'mine'
+          ? 'You will see an update here when the client decides.'
+          : 'You can still apply while the task remains open.'
+        : 'Compare prices, arrival times and worker profiles.',
       step: 1,
-      tone: "primary",
+      tone: 'primary',
     };
   return {
-    eyebrow: "FINDING A MATCH",
-    title: isWorker ? "Open for applications" : "Waiting for workers to apply",
+    eyebrow: 'FINDING A MATCH',
+    title: isWorker ? 'Open for applications' : 'Waiting for workers to apply',
     detail: isWorker
       ? `${client} is accepting applications for this task.`
-      : "We will show applications here as workers respond.",
+      : 'We will show applications here as workers respond.',
     step: 1,
-    tone: "primary",
+    tone: 'primary',
   };
 }
 
 export default function TasksScreen() {
   const router = useRouter();
-  const { section } = useLocalSearchParams<{ section?: string }>();
+  const { section, view } = useLocalSearchParams<{ section?: string; view?: string }>();
   const { user } = useAuth();
   const { colors } = useAppTheme();
-  const [tab, setTab] = useState<TaskTab>("mine");
-  const [mineView, setMineView] = useState<MineView>("current");
-  const [openView, setOpenView] = useState<OpenView>("list");
+  const [tab, setTab] = useState<TaskTab>('mine');
+  const [mineView, setMineView] = useState<MineView>('current');
+  const [openView, setOpenView] = useState<OpenView>('list');
   const [items, setItems] = useState<TaskCardData[]>([]);
-  const [workerLocation, setWorkerLocation] = useState<Coordinates | null>(
-    null,
-  );
+  const [workerLocation, setWorkerLocation] = useState<Coordinates | null>(null);
   const [radiusKm, setRadiusKm] = useState(15);
   const [zoneOnly, setZoneOnly] = useState(false);
   const [page, setPage] = useState(0);
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
+  const [dateFilterVisible, setDateFilterVisible] = useState(false);
+  const [previousDates, setPreviousDates] = useState<DateRange>({
+    from: null,
+    to: null,
+  });
+  const [draftDates, setDraftDates] = useState<DateRange>({
+    from: null,
+    to: null,
+  });
+  const [activeDateField, setActiveDateField] = useState<DateField | null>(null);
+  const [dateFilterError, setDateFilterError] = useState('');
   const requestVersion = useRef(0);
   const workerLocationRef = useRef<Coordinates | null>(null);
-  const isWorker = user?.role === "RUNNER";
-  const requestedTab: TaskTab | null =
-    section === "open" || section === "mine" ? section : null;
-  const activeTab: TaskTab = isWorker ? (requestedTab ?? tab) : "mine";
+  const isWorker = user?.role === 'RUNNER';
+  const requestedTab: TaskTab | null = section === 'open' || section === 'mine' ? section : null;
+  const activeTab: TaskTab = isWorker ? (requestedTab ?? tab) : 'mine';
+  const previousFromDate = previousDates.from ? apiDate(previousDates.from) : undefined;
+  const previousToDate = previousDates.to ? apiDate(previousDates.to) : undefined;
+  const hasPreviousDateFilter = Boolean(previousFromDate || previousToDate);
+
+  useEffect(() => {
+    if (view === 'map' || view === 'list') setOpenView(view);
+  }, [view]);
+
+  const openDateFilter = useCallback(() => {
+    setDraftDates(previousDates);
+    setDateFilterError('');
+    setActiveDateField(null);
+    setDateFilterVisible(true);
+  }, [previousDates]);
+
+  const updateDraftDate = useCallback((field: DateField, selected: Date | undefined) => {
+    setActiveDateField(null);
+    if (!selected) return;
+    setDateFilterError('');
+    setDraftDates((current) => {
+      if (field === 'from') {
+        return {
+          from: selected,
+          to: current.to && current.to < selected ? selected : current.to,
+        };
+      }
+      return {
+        from: current.from && current.from > selected ? selected : current.from,
+        to: selected,
+      };
+    });
+  }, []);
+
+  const chooseDate = useCallback(
+    (field: DateField) => {
+      const value = draftDates[field] ?? new Date();
+      if (Platform.OS === 'android') {
+        DateTimePickerAndroid.open({
+          value,
+          mode: 'date',
+          maximumDate: new Date(),
+          minimumDate: field === 'to' ? (draftDates.from ?? undefined) : undefined,
+          onChange: (event: DateTimePickerEvent, selected?: Date) => {
+            if (event.type === 'set') updateDraftDate(field, selected);
+          },
+        });
+        return;
+      }
+      setActiveDateField(field);
+    },
+    [draftDates, updateDraftDate],
+  );
+
+  const applyDateFilter = useCallback(() => {
+    if (draftDates.from && draftDates.to && draftDates.from > draftDates.to) {
+      setDateFilterError('Choose an end date after the start date.');
+      return;
+    }
+    setPreviousDates(draftDates);
+    setDateFilterVisible(false);
+    setActiveDateField(null);
+  }, [draftDates]);
+
+  const clearDateFilter = useCallback(() => {
+    setDraftDates({ from: null, to: null });
+    setPreviousDates({ from: null, to: null });
+    setDateFilterVisible(false);
+    setActiveDateField(null);
+    setDateFilterError('');
+  }, []);
 
   const selectTab = useCallback(
     (nextTab: TaskTab) => {
@@ -246,14 +326,10 @@ export default function TasksScreen() {
     async (nextPage = 0, forceRefresh = false) => {
       const version = ++requestVersion.current;
       nextPage === 0 ? setLoading(true) : setLoadingMore(true);
-      setError("");
+      setError('');
       try {
         let coordinates = workerLocationRef.current;
-        if (
-          activeTab === "open" &&
-          nextPage === 0 &&
-          (!coordinates || forceRefresh)
-        ) {
+        if (activeTab === 'open' && nextPage === 0 && (!coordinates || forceRefresh)) {
           const permission = await Location.requestForegroundPermissionsAsync();
           if (permission.granted) {
             const current = await Location.getCurrentPositionAsync({
@@ -268,19 +344,16 @@ export default function TasksScreen() {
             await taskApi.updateDiscoveryLocation(coordinates);
           }
         }
-        const result = await (activeTab === "mine"
+        const result = await (activeTab === 'mine'
           ? taskApi.mine(
               nextPage,
-              mineView === "current" ? "CURRENT" : "PREVIOUS",
+              mineView === 'current' ? 'CURRENT' : 'PREVIOUS',
               forceRefresh,
+              mineView === 'previous'
+                ? { fromDate: previousFromDate, toDate: previousToDate }
+                : undefined,
             )
-          : taskApi.open(
-              nextPage,
-              coordinates ?? undefined,
-              radiusKm,
-              zoneOnly,
-              forceRefresh,
-            ));
+          : taskApi.open(nextPage, coordinates ?? undefined, radiusKm, zoneOnly, forceRefresh));
         if (version !== requestVersion.current) return;
         setItems((previous) =>
           nextPage === 0
@@ -288,8 +361,7 @@ export default function TasksScreen() {
             : [
                 ...previous,
                 ...result.items.filter(
-                  (item) =>
-                    !previous.some((existing) => existing.id === item.id),
+                  (item) => !previous.some((existing) => existing.id === item.id),
                 ),
               ],
         );
@@ -298,9 +370,7 @@ export default function TasksScreen() {
       } catch (cause) {
         if (version === requestVersion.current) {
           setError(
-            cause instanceof ApiError
-              ? cause.message
-              : "We couldn't load tasks. Try again.",
+            cause instanceof ApiError ? cause.message : "We couldn't load tasks. Try again.",
           );
         }
       } finally {
@@ -310,7 +380,7 @@ export default function TasksScreen() {
         }
       }
     },
-    [activeTab, mineView, radiusKm, zoneOnly],
+    [activeTab, mineView, previousFromDate, previousToDate, radiusKm, zoneOnly],
   );
 
   useFocusEffect(
@@ -330,8 +400,8 @@ export default function TasksScreen() {
           <AppText variant="title">Tasks</AppText>
           <AppText color={colors.textSecondary}>
             {isWorker
-              ? "Manage your jobs and find your next one."
-              : "Everything you have posted, in one place."}
+              ? 'Manage your jobs and find your next one.'
+              : 'Everything you have posted, in one place.'}
           </AppText>
         </View>
         <Pressable
@@ -349,81 +419,62 @@ export default function TasksScreen() {
 
       {!isWorker ? (
         <AnimatedEntrance delay={45}>
-          <Button
-            label="Post a task"
-            icon="add-outline"
-            onPress={() => router.push("/task/new")}
-          />
+          <Button label="Post a task" icon="add-outline" onPress={() => router.push('/task/new')} />
         </AnimatedEntrance>
       ) : null}
 
       {isWorker ? (
         <AnimatedEntrance
           delay={70}
-          style={StyleSheet.flatten([
-            styles.tabs,
-            { backgroundColor: colors.surfaceSecondary },
-          ])}
+          style={StyleSheet.flatten([styles.tabs, { backgroundColor: colors.surfaceSecondary }])}
         >
           <TabButton
             label="My tasks"
-            active={activeTab === "mine"}
-            onPress={() => selectTab("mine")}
+            active={activeTab === 'mine'}
+            onPress={() => selectTab('mine')}
           />
           <TabButton
             label="Open for you"
-            active={activeTab === "open"}
-            onPress={() => selectTab("open")}
+            active={activeTab === 'open'}
+            onPress={() => selectTab('open')}
           />
         </AnimatedEntrance>
       ) : null}
 
-      {activeTab === "mine" ? (
+      {activeTab === 'mine' ? (
         <AnimatedEntrance
           delay={90}
-          style={StyleSheet.flatten([
-            styles.periodTabs,
-            { borderBottomColor: colors.divider },
-          ])}
+          style={StyleSheet.flatten([styles.periodTabs, { borderBottomColor: colors.divider }])}
         >
           <PeriodTab
             label="Current"
-            active={mineView === "current"}
-            onPress={() => setMineView("current")}
+            active={mineView === 'current'}
+            onPress={() => setMineView('current')}
           />
           <PeriodTab
             label="Previous"
-            active={mineView === "previous"}
-            onPress={() => setMineView("previous")}
+            active={mineView === 'previous'}
+            onPress={() => setMineView('previous')}
           />
         </AnimatedEntrance>
       ) : null}
 
-      <AnimatedEntrance
-        key={`${activeTab}-${mineView}`}
-        delay={110}
-        style={styles.list}
-      >
+      <AnimatedEntrance key={`${activeTab}-${mineView}`} delay={110} style={styles.list}>
         <View style={styles.boardHeading}>
           <AppText variant="subtitle">
-            {activeTab === "open"
-              ? "Open tasks"
-              : mineView === "previous"
+            {activeTab === 'open'
+              ? 'Open tasks'
+              : mineView === 'previous'
                 ? isWorker
-                  ? "Previous work"
-                  : "Previous tasks"
+                  ? 'Previous work'
+                  : 'Previous tasks'
                 : isWorker
-                  ? "Current work"
-                  : "Current tasks"}
+                  ? 'Current work'
+                  : 'Current tasks'}
           </AppText>
-          {activeTab === "open" ? (
-            <View
-              style={[
-                styles.viewToggle,
-                { backgroundColor: colors.surfaceSecondary },
-              ]}
-            >
-              {(["list", "map"] as OpenView[]).map((view) => (
+          {activeTab === 'open' ? (
+            <View style={[styles.viewToggle, { backgroundColor: colors.surfaceSecondary }]}>
+              {(['list', 'map'] as OpenView[]).map((view) => (
                 <Pressable
                   key={view}
                   onPress={() => setOpenView(view)}
@@ -433,24 +484,52 @@ export default function TasksScreen() {
                   ]}
                 >
                   <Ionicons
-                    name={view === "list" ? "list-outline" : "map-outline"}
+                    name={view === 'list' ? 'list-outline' : 'map-outline'}
                     size={18}
-                    color={
-                      openView === view ? colors.primary : colors.textMuted
-                    }
+                    color={openView === view ? colors.primary : colors.textMuted}
                   />
                 </Pressable>
               ))}
             </View>
+          ) : mineView === 'previous' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Filter previous tasks by date"
+              accessibilityState={{ selected: hasPreviousDateFilter }}
+              onPress={openDateFilter}
+              style={({ pressed }) => [
+                styles.dateFilterButton,
+                {
+                  backgroundColor: hasPreviousDateFilter ? colors.primarySoft : 'transparent',
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name={hasPreviousDateFilter ? 'calendar' : 'calendar-outline'}
+                size={20}
+                color={hasPreviousDateFilter ? colors.primary : colors.textMuted}
+              />
+              {hasPreviousDateFilter ? (
+                <View style={[styles.filterActiveDot, { backgroundColor: colors.primary }]} />
+              ) : null}
+            </Pressable>
           ) : null}
         </View>
-        {activeTab === "open" ? (
-          <View
-            style={[
-              styles.discoveryControls,
-              { borderBottomColor: colors.divider },
-            ]}
-          >
+        {activeTab === 'mine' && mineView === 'previous' && hasPreviousDateFilter ? (
+          <View style={styles.appliedDateLine}>
+            <AppText variant="caption" color={colors.textSecondary}>
+              {displayDate(previousDates.from)} to {displayDate(previousDates.to)}
+            </AppText>
+            <Pressable accessibilityRole="button" onPress={clearDateFilter}>
+              <AppText variant="caption" color={colors.primary}>
+                Clear
+              </AppText>
+            </Pressable>
+          </View>
+        ) : null}
+        {activeTab === 'open' ? (
+          <View style={[styles.discoveryControls, { borderBottomColor: colors.divider }]}>
             <View style={styles.discoveryHeading}>
               <View>
                 <AppText variant="bodyMedium">Search distance</AppText>
@@ -465,21 +544,16 @@ export default function TasksScreen() {
                 style={[
                   styles.zoneChoice,
                   {
-                    backgroundColor: zoneOnly
-                      ? colors.primarySoft
-                      : colors.surfaceSecondary,
+                    backgroundColor: zoneOnly ? colors.primarySoft : colors.surfaceSecondary,
                   },
                 ]}
               >
                 <Ionicons
-                  name={zoneOnly ? "locate" : "locate-outline"}
+                  name={zoneOnly ? 'locate' : 'locate-outline'}
                   size={16}
                   color={zoneOnly ? colors.primary : colors.textMuted}
                 />
-                <AppText
-                  variant="caption"
-                  color={zoneOnly ? colors.primary : colors.textSecondary}
-                >
+                <AppText variant="caption" color={zoneOnly ? colors.primary : colors.textSecondary}>
                   This zone only
                 </AppText>
               </Pressable>
@@ -498,22 +572,14 @@ export default function TasksScreen() {
                   style={[
                     styles.radiusChoice,
                     {
-                      borderColor:
-                        radiusKm === distance ? colors.primary : colors.border,
-                      backgroundColor:
-                        radiusKm === distance
-                          ? colors.primarySoft
-                          : colors.surface,
+                      borderColor: radiusKm === distance ? colors.primary : colors.border,
+                      backgroundColor: radiusKm === distance ? colors.primarySoft : colors.surface,
                     },
                   ]}
                 >
                   <AppText
                     variant="caption"
-                    color={
-                      radiusKm === distance
-                        ? colors.primary
-                        : colors.textSecondary
-                    }
+                    color={radiusKm === distance ? colors.primary : colors.textSecondary}
                   >
                     {distance} km
                   </AppText>
@@ -526,71 +592,66 @@ export default function TasksScreen() {
         {error ? (
           <SurfaceCard style={styles.emptyCard}>
             <AppText color={colors.danger}>{error}</AppText>
-            <Button
-              label="Try again"
-              variant="secondary"
-              onPress={() => load(0, true)}
-            />
+            <Button label="Try again" variant="secondary" onPress={() => load(0, true)} />
           </SurfaceCard>
         ) : null}
-        {!loading && !error && items.length === 0 ? (
+        {!loading &&
+        !error &&
+        items.length === 0 &&
+        !(activeTab === 'open' && openView === 'map') ? (
           <SurfaceCard style={styles.emptyCard}>
             <Ionicons
               name={
-                activeTab === "open"
-                  ? "search-outline"
-                  : mineView === "previous"
-                    ? "time-outline"
-                    : "briefcase-outline"
+                activeTab === 'open'
+                  ? 'search-outline'
+                  : mineView === 'previous'
+                    ? 'time-outline'
+                    : 'briefcase-outline'
               }
               size={30}
               color={colors.primary}
             />
             <AppText variant="subtitle">
-              {activeTab === "open"
-                ? "No open tasks right now"
-                : mineView === "previous"
-                  ? "No previous tasks yet"
-                  : "No current tasks"}
+              {activeTab === 'open'
+                ? 'No open tasks right now'
+                : mineView === 'previous'
+                  ? hasPreviousDateFilter
+                    ? 'No tasks in this date range'
+                    : 'No previous tasks yet'
+                  : 'No current tasks'}
             </AppText>
             <AppText color={colors.textMuted} style={styles.emptyText}>
-              {activeTab === "open"
-                ? "Check back soon for new opportunities."
-                : mineView === "previous"
-                  ? isWorker
-                    ? "Jobs you complete or cancel will be kept here."
-                    : "Finished or cancelled tasks will be kept here."
+              {activeTab === 'open'
+                ? 'Check back soon for new opportunities.'
+                : mineView === 'previous'
+                  ? hasPreviousDateFilter
+                    ? 'Try changing or clearing the selected dates.'
+                    : isWorker
+                      ? 'Jobs you complete or cancel will be kept here.'
+                      : 'Finished or cancelled tasks will be kept here.'
                   : isWorker
-                    ? "Apply for an open task to see it here."
-                    : "Post a task to get started."}
+                    ? 'Apply for an open task to see it here.'
+                    : 'Post a task to get started.'}
             </AppText>
           </SurfaceCard>
         ) : null}
-        {!loading &&
-        activeTab === "open" &&
-        openView === "map" &&
-        items.length > 0 ? (
+        {!loading && !error && activeTab === 'open' && openView === 'map' ? (
           <OpenTasksMap
             tasks={items}
             workerLocation={workerLocation}
-            onSelect={(task) =>
-              router.push({ pathname: "/task/[id]", params: { id: task.id } })
-            }
+            onSelect={(task) => router.push({ pathname: '/task/[id]', params: { id: task.id } })}
           />
-        ) : (
-          !loading &&
+        ) : !loading && !error ? (
           items.map((task) => (
             <TaskCard
               key={task.id}
               task={task}
               isWorker={isWorker}
               board={activeTab}
-              onPress={() =>
-                router.push({ pathname: "/task/[id]", params: { id: task.id } })
-              }
+              onPress={() => router.push({ pathname: '/task/[id]', params: { id: task.id } })}
             />
           ))
-        )}
+        ) : null}
         {hasNext ? (
           <Button
             label="Load more"
@@ -600,7 +661,95 @@ export default function TasksScreen() {
           />
         ) : null}
       </AnimatedEntrance>
+
+      <Modal
+        visible={dateFilterVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDateFilterVisible(false)}
+      >
+        <View style={styles.dateFilterOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setDateFilterVisible(false)} />
+          <View style={[styles.dateFilterSheet, { backgroundColor: colors.surface }]}>
+            <View style={styles.dateFilterHeader}>
+              <View style={styles.dateFilterHeadingCopy}>
+                <AppText variant="title">Previous tasks</AppText>
+                <AppText color={colors.textSecondary}>
+                  Choose when the task was last completed or closed.
+                </AppText>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close date filter"
+                onPress={() => setDateFilterVisible(false)}
+                style={[styles.dateFilterClose, { backgroundColor: colors.surfaceSecondary }]}
+              >
+                <Ionicons name="close" size={21} color={colors.text} />
+              </Pressable>
+            </View>
+
+            <View style={styles.dateFields}>
+              <DateFieldButton
+                label="From"
+                value={draftDates.from}
+                onPress={() => chooseDate('from')}
+              />
+              <View style={[styles.dateConnector, { backgroundColor: colors.divider }]} />
+              <DateFieldButton label="To" value={draftDates.to} onPress={() => chooseDate('to')} />
+            </View>
+
+            {Platform.OS !== 'android' && activeDateField ? (
+              <DateTimePicker
+                value={draftDates[activeDateField] ?? new Date()}
+                mode="date"
+                display="inline"
+                maximumDate={new Date()}
+                minimumDate={activeDateField === 'to' ? (draftDates.from ?? undefined) : undefined}
+                onChange={(event, selected) => {
+                  if (event.type === 'set') updateDraftDate(activeDateField, selected);
+                }}
+              />
+            ) : null}
+
+            {dateFilterError ? (
+              <AppText variant="caption" color={colors.danger}>
+                {dateFilterError}
+              </AppText>
+            ) : null}
+
+            <Button label="Apply date filter" icon="checkmark" onPress={applyDateFilter} />
+            <Button label="Clear dates" variant="ghost" onPress={clearDateFilter} />
+          </View>
+        </View>
+      </Modal>
     </Screen>
+  );
+}
+
+function DateFieldButton({
+  label,
+  value,
+  onPress,
+}: {
+  label: string;
+  value: Date | null;
+  onPress(): void;
+}) {
+  const { colors } = useAppTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Choose ${label.toLowerCase()} date`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.dateField, { opacity: pressed ? 0.7 : 1 }]}
+    >
+      <AppText variant="caption" color={colors.textMuted}>
+        {label}
+      </AppText>
+      <AppText variant="bodyMedium" color={value ? colors.text : colors.textMuted}>
+        {displayDate(value)}
+      </AppText>
+    </Pressable>
   );
 }
 
@@ -622,15 +771,12 @@ function PeriodTab({
       style={({ pressed }) => [
         styles.periodTab,
         {
-          borderBottomColor: active ? colors.primary : "transparent",
+          borderBottomColor: active ? colors.primary : 'transparent',
           opacity: pressed ? 0.7 : 1,
         },
       ]}
     >
-      <AppText
-        variant="bodyMedium"
-        color={active ? colors.primary : colors.textMuted}
-      >
+      <AppText variant="bodyMedium" color={active ? colors.primary : colors.textMuted}>
         {label}
       </AppText>
     </Pressable>
@@ -655,15 +801,12 @@ function TabButton({
       style={({ pressed }) => [
         styles.tab,
         {
-          backgroundColor: active ? colors.surface : "transparent",
+          backgroundColor: active ? colors.surface : 'transparent',
           opacity: pressed ? 0.75 : 1,
         },
       ]}
     >
-      <AppText
-        variant="bodyMedium"
-        color={active ? colors.primary : colors.textMuted}
-      >
+      <AppText variant="bodyMedium" color={active ? colors.primary : colors.textMuted}>
         {label}
       </AppText>
     </Pressable>
@@ -695,20 +838,12 @@ function TaskCard({
       accessibilityRole="button"
       accessibilityLabel={`View ${task.title}`}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.cardPress,
-        { opacity: pressed ? 0.82 : 1 },
-      ]}
+      style={({ pressed }) => [styles.cardPress, { opacity: pressed ? 0.82 : 1 }]}
     >
       <SurfaceCard style={styles.taskCard}>
         <View style={styles.taskTop}>
           <View style={styles.taskTitle}>
-            <View
-              style={[
-                styles.categoryBadge,
-                { backgroundColor: colors.primarySoft },
-              ]}
-            >
+            <View style={[styles.categoryBadge, { backgroundColor: colors.primarySoft }]}>
               <AppText variant="caption" color={colors.primary}>
                 {task.category}
               </AppText>
@@ -723,19 +858,17 @@ function TaskCard({
             text={`${task.distanceKm.toFixed(1)} km away${
               task.estimatedTravelMinutes != null
                 ? ` · about ${task.estimatedTravelMinutes} min`
-                : ""
+                : ''
             }`}
           />
         ) : null}
         {task.scheduledStartAt ? (
           <DetailRow
             icon="calendar-outline"
-            text={new Date(task.scheduledStartAt).toLocaleString("en-NG")}
+            text={new Date(task.scheduledStartAt).toLocaleString('en-NG')}
           />
         ) : null}
-        <View
-          style={[styles.stagePanel, { backgroundColor: stageTone.background }]}
-        >
+        <View style={[styles.stagePanel, { backgroundColor: stageTone.background }]}>
           <View style={styles.stageProgress}>
             {[1, 2, 3, 4].map((step) => (
               <View
@@ -743,8 +876,7 @@ function TaskCard({
                 style={[
                   styles.stageSegment,
                   {
-                    backgroundColor:
-                      step <= stage.step ? stageTone.color : colors.border,
+                    backgroundColor: step <= stage.step ? stageTone.color : colors.border,
                   },
                 ]}
               />
@@ -760,9 +892,7 @@ function TaskCard({
         </View>
         <View style={[styles.taskFooter, { borderTopColor: colors.divider }]}>
           <View>
-            <AppText variant="subtitle">
-              {money(task.acceptedPrice ?? task.budget)}
-            </AppText>
+            <AppText variant="subtitle">{money(task.acceptedPrice ?? task.budget)}</AppText>
           </View>
           <Ionicons name="chevron-forward" size={19} color={colors.primary} />
         </View>
@@ -771,13 +901,7 @@ function TaskCard({
   );
 }
 
-function DetailRow({
-  icon,
-  text,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  text: string;
-}) {
+function DetailRow({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
   const { colors } = useAppTheme();
   return (
     <View style={styles.detailRow}>
@@ -796,9 +920,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
   },
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   headerCopy: { flex: 1, gap: spacing.xs, paddingRight: spacing.lg },
   filterButton: {
@@ -806,11 +930,11 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: radius.md,
     borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  tabs: { flexDirection: "row", borderRadius: radius.lg, padding: 4 },
-  periodTabs: { flexDirection: "row", gap: spacing.xl, borderBottomWidth: 1 },
+  tabs: { flexDirection: 'row', borderRadius: radius.lg, padding: 4 },
+  periodTabs: { flexDirection: 'row', gap: spacing.xl, borderBottomWidth: 1 },
   periodTab: {
     paddingHorizontal: spacing.xs,
     paddingBottom: spacing.sm,
@@ -819,23 +943,46 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: radius.md,
   },
   list: { gap: spacing.md },
   boardHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  viewToggle: { flexDirection: "row", borderRadius: radius.md, padding: 3 },
+  dateFilterButton: {
+    position: 'relative',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterActiveDot: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  appliedDateLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  viewToggle: { flexDirection: 'row', borderRadius: radius.md, padding: 3 },
   viewChoice: {
     width: 38,
     height: 34,
     borderRadius: radius.sm,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   discoveryControls: {
     gap: spacing.md,
@@ -843,14 +990,14 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
   },
   discoveryHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: spacing.md,
   },
   zoneChoice: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 5,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
@@ -859,48 +1006,76 @@ const styles = StyleSheet.create({
   radiusChoices: { gap: spacing.sm, paddingRight: spacing.lg },
   radiusChoice: {
     minWidth: 62,
-    alignItems: "center",
+    alignItems: 'center',
     borderWidth: 1,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
   emptyCard: {
-    alignItems: "center",
+    alignItems: 'center',
     gap: spacing.md,
     paddingVertical: spacing.xxl,
   },
-  emptyText: { textAlign: "center" },
+  emptyText: { textAlign: 'center' },
   cardPress: { borderRadius: radius.lg },
   taskCard: { gap: spacing.sm },
   taskTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     gap: spacing.md,
   },
   taskTitle: { flex: 1, gap: spacing.sm },
   categoryBadge: {
-    alignSelf: "flex-start",
+    alignSelf: 'flex-start',
     borderRadius: radius.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
   },
-  detailRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   stagePanel: {
     borderRadius: radius.md,
     padding: spacing.md,
     gap: 5,
     marginTop: spacing.xs,
   },
-  stageProgress: { flexDirection: "row", gap: 5, marginBottom: spacing.xs },
+  stageProgress: { flexDirection: 'row', gap: 5, marginBottom: spacing.xs },
   stageSegment: { flex: 1, height: 3, borderRadius: radius.pill },
   taskFooter: {
     borderTopWidth: 1,
     paddingTop: spacing.md,
     marginTop: spacing.xs,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
+  dateFilterOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(7,13,30,0.65)',
+  },
+  dateFilterSheet: {
+    gap: spacing.lg,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl,
+    paddingBottom: spacing.xxxl,
+  },
+  dateFilterHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.lg,
+  },
+  dateFilterHeadingCopy: { flex: 1, gap: spacing.xs },
+  dateFilterClose: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateFields: { gap: spacing.sm },
+  dateField: { gap: 4, paddingVertical: spacing.sm },
+  dateConnector: { width: 1, height: 18, marginLeft: spacing.sm },
 });

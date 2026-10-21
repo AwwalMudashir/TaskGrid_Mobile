@@ -1,9 +1,9 @@
-import Ionicons from "@expo/vector-icons/Ionicons";
-import * as Location from "expo-location";
-import { LinearGradient } from "expo-linear-gradient";
-import * as WebBrowser from "expo-web-browser";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Location from 'expo-location';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as WebBrowser from 'expo-web-browser';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -15,79 +15,84 @@ import {
   StyleSheet,
   View,
   Linking,
-} from "react-native";
+} from 'react-native';
 
-import { AppText } from "@/src/components/ui/AppText";
-import { AnimatedEntrance } from "@/src/components/ui/AnimatedEntrance";
-import { AuthHeader } from "@/src/components/ui/AuthHeader";
-import { Button } from "@/src/components/ui/Button";
-import { MoneyField } from "@/src/components/ui/MoneyField";
-import { Screen } from "@/src/components/ui/Screen";
-import { TaskDetailSkeleton } from "@/src/components/ui/SkeletonLoader";
-import { SurfaceCard } from "@/src/components/ui/SurfaceCard";
-import { TextField } from "@/src/components/ui/TextField";
-import { useAuth } from "@/src/features/auth/AuthContext";
-import type { LocalProfileImage } from "@/src/features/auth/types";
-import { TaskAreaMap } from "@/src/features/tasks/TaskAreaMap";
-import { TaskJourneyMap } from "@/src/features/tasks/TaskJourneyMap";
-import { TaskPhotoPicker } from "@/src/features/tasks/TaskPhotoPicker";
+import { AppText } from '@/src/components/ui/AppText';
+import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
+import { AuthHeader } from '@/src/components/ui/AuthHeader';
+import { Button } from '@/src/components/ui/Button';
+import { MoneyField } from '@/src/components/ui/MoneyField';
+import { Screen } from '@/src/components/ui/Screen';
+import { TaskDetailSkeleton } from '@/src/components/ui/SkeletonLoader';
+import { SurfaceCard } from '@/src/components/ui/SurfaceCard';
+import { TextField } from '@/src/components/ui/TextField';
+import { useAuth } from '@/src/features/auth/AuthContext';
+import type { LocalProfileImage } from '@/src/features/auth/types';
+import { TaskAreaMap } from '@/src/features/tasks/TaskAreaMap';
+import { TaskJourneyMap } from '@/src/features/tasks/TaskJourneyMap';
+import { TaskPhotoPicker } from '@/src/features/tasks/TaskPhotoPicker';
 import {
   requestJourneyLocationPermissions,
   startJourneyLocationTracking,
   stopJourneyLocationTracking,
-} from "@/src/features/tasks/journey-location-task";
+} from '@/src/features/tasks/journey-location-task';
 import {
   emergencyContactApi,
   taskApi,
   type Coordinates,
+  type LifecycleReminder,
+  type LifecycleReminderAction,
   type TaskBid,
+  type TaskCancellation,
+  type TaskCancellationReason,
   type TaskDetail,
   type TaskImage,
-} from "@/src/features/tasks/task-api";
-import { ApiError, kycApi } from "@/src/lib/api";
-import { safetyApi } from "@/src/features/safety/safety-api";
-import { radius, spacing, useAppTheme } from "@/src/theme";
+} from '@/src/features/tasks/task-api';
+import { ApiError, kycApi } from '@/src/lib/api';
+import { safetyApi } from '@/src/features/safety/safety-api';
+import { radius, spacing, useAppTheme } from '@/src/theme';
 
 const money = (amount: number | null) =>
   amount == null
-    ? "To agree"
-    : `₦${amount.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    ? 'To agree'
+    : `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const label = (value: string) =>
   value
     .toLowerCase()
-    .replace(/_/g, " ")
+    .replace(/_/g, ' ')
     .replace(/^./, (letter) => letter.toUpperCase());
-const isOpen = (task: TaskDetail) =>
-  task.status === "POSTED" || task.status === "BID_RECEIVED";
-const closedTaskStatuses = new Set(["PAID", "REFUNDED", "CANCELLED"]);
+const isOpen = (task: TaskDetail) => task.status === 'POSTED' || task.status === 'BID_RECEIVED';
+const closedTaskStatuses = new Set(['PAID', 'REFUNDED', 'CANCELLED']);
 type BusyAction =
-  | "brief-upload"
-  | "apply"
-  | "accept"
-  | "checkout"
-  | "journey-start"
-  | "journey-arrive"
-  | "journey-stop"
-  | "complete"
-  | "confirm"
-  | "review"
-  | "report-review"
-  | "manual-arrival"
-  | "sos";
+  | 'brief-upload'
+  | 'apply'
+  | 'accept'
+  | 'checkout'
+  | 'journey-start'
+  | 'journey-arrive'
+  | 'journey-stop'
+  | 'complete'
+  | 'confirm'
+  | 'review'
+  | 'report-review'
+  | 'manual-arrival'
+  | 'cancel-task'
+  | 'sos';
 
-const ratingLabels = [
-  "",
-  "Disappointing",
-  "Could be better",
-  "Good",
-  "Great",
-  "Excellent",
+const cancellationReasons: { value: TaskCancellationReason; label: string }[] = [
+  { value: 'NO_LONGER_NEEDED', label: 'I no longer need the task' },
+  { value: 'PLANS_CHANGED', label: 'My plans changed' },
+  { value: 'DUPLICATE_TASK', label: 'I posted it twice' },
+  { value: 'WORKER_DELAYED', label: 'The worker is delayed' },
+  { value: 'OTHER', label: 'Another reason' },
 ];
+
+const ratingLabels = ['', 'Disappointing', 'Could be better', 'Good', 'Great', 'Excellent'];
 
 function reviewTimeRemaining(deadline: string | null, now: number) {
   if (!deadline) return null;
   const remaining = new Date(deadline).getTime() - now;
-  if (remaining <= 0) return "Review window ended";
+  if (remaining <= 0) return 'Review window ended';
   const totalMinutes = Math.ceil(remaining / 60_000);
   const days = Math.floor(totalMinutes / 1440);
   const hours = Math.floor((totalMinutes % 1440) / 60);
@@ -97,127 +102,96 @@ function reviewTimeRemaining(deadline: string | null, now: number) {
   return `${minutes}m remaining`;
 }
 
-function paymentWording(
-  task: TaskDetail,
-  isOwner: boolean,
-  isAssigned: boolean,
-) {
+function paymentWording(task: TaskDetail, isOwner: boolean, isAssigned: boolean) {
   switch (task.paymentStatus) {
-    case "INITIALIZED":
+    case 'INITIALIZED':
+      return isOwner
+        ? ['Payment awaiting confirmation', 'Complete checkout so the worker can begin safely.']
+        : ['Client payment pending', 'Wait for payment confirmation before starting the task.'];
+    case 'HELD':
       return isOwner
         ? [
-            "Payment awaiting confirmation",
-            "Complete checkout so the worker can begin safely.",
+            'Payment protected',
+            'Your payment is protected by TaskGrid. It has not been paid to the worker yet.',
           ]
         : [
-            "Client payment pending",
-            "Wait for payment confirmation before starting the task.",
+            'Earnings secured',
+            'The client has paid. Your agreed earnings remain protected while you complete the task.',
           ];
-    case "HELD":
+    case 'IN_PROGRESS':
+      return isOwner
+        ? ['Payment protected', 'The worker cannot withdraw this payment while the task is active.']
+        : ['Earnings secured', 'The client payment is protected while you complete the task.'];
+    case 'COMPLETED':
       return isOwner
         ? [
-            "Payment protected",
-            "Your payment is protected by TaskGrid. It has not been paid to the worker yet.",
+            'Work ready for review',
+            'Review the completion photos before the deadline. Approve the work or open a dispute.',
           ]
         : [
-            "Earnings secured",
-            "The client has paid. Your agreed earnings remain protected while you complete the task.",
+            'Awaiting client review',
+            'Your evidence was submitted. If no dispute is opened, the earnings release after the review deadline.',
           ];
-    case "IN_PROGRESS":
-      return isOwner
-        ? [
-            "Payment protected",
-            "The worker cannot withdraw this payment while the task is active.",
-          ]
-        : [
-            "Earnings secured",
-            "The client payment is protected while you complete the task.",
-          ];
-    case "COMPLETED":
-      return isOwner
-        ? [
-            "Work ready for review",
-            "Review the completion photos before the deadline. Approve the work or open a dispute.",
-          ]
-        : [
-            "Awaiting client review",
-            "Your evidence was submitted. If no dispute is opened, the earnings release after the review deadline.",
-          ];
-    case "RELEASED":
+    case 'RELEASED':
       return isAssigned
         ? [
-            "Earnings available",
-            "The earnings have been released and are now included in your available wallet balance.",
+            'Earnings available',
+            'The earnings have been released and are now included in your available wallet balance.',
           ]
         : [
-            "Payment released",
-            "The review is complete and the payment is now available to the worker.",
+            'Payment released',
+            'The review is complete and the payment is now available to the worker.',
           ];
-    case "PARTIALLY_RELEASED":
+    case 'PARTIALLY_RELEASED':
       return isAssigned
-        ? [
-            "Partial earnings released",
-            "Your approved portion is now available in your wallet.",
-          ]
+        ? ['Partial earnings released', 'Your approved portion is now available in your wallet.']
         : [
-            "Partial refund completed",
-            "The approved worker portion was released and the remaining amount was refunded to you.",
+            'Partial refund completed',
+            'The approved worker portion was released and the remaining amount was refunded to you.',
           ];
-    case "DISPUTED":
+    case 'DISPUTED':
       return isOwner
         ? [
-            "Payment frozen",
-            "Your payment remains protected while TaskGrid reviews the dispute. It cannot be released to the worker yet.",
+            'Payment frozen',
+            'Your payment remains protected while TaskGrid reviews the dispute. It cannot be released to the worker yet.',
           ]
         : [
-            "Earnings frozen",
-            "The disputed earnings cannot enter your available balance until TaskGrid resolves the case.",
+            'Earnings frozen',
+            'The disputed earnings cannot enter your available balance until TaskGrid resolves the case.',
           ];
-    case "REFUND_PENDING":
+    case 'REFUND_PENDING':
+      return isOwner
+        ? ['Refund processing', 'The case is resolved and Paystack is processing your refund.']
+        : [
+            'Resolution processing',
+            'Your approved portion will become available after the refund is confirmed.',
+          ];
+    case 'REFUNDED':
       return isOwner
         ? [
-            "Refund processing",
-            "The case is resolved and Paystack is processing your refund.",
+            'Refund completed',
+            'The resolved amount has been returned to your original payment method.',
           ]
-        : [
-            "Resolution processing",
-            "Your approved portion will become available after the refund is confirmed.",
-          ];
-    case "REFUNDED":
+        : ['Payment refunded', 'The case was resolved with this amount returned to the client.'];
+    case 'FAILED':
       return isOwner
-        ? [
-            "Refund completed",
-            "The resolved amount has been returned to your original payment method.",
-          ]
-        : [
-            "Payment refunded",
-            "The case was resolved with this amount returned to the client.",
-          ];
-    case "FAILED":
-      return isOwner
-        ? [
-            "Payment needs attention",
-            "The payment did not complete. Try again or contact support.",
-          ]
-        : [
-            "Payment not secured",
-            "Do not begin work until the client payment is confirmed.",
-          ];
-    case "CANCELLED":
-      return [
-        "Payment cancelled",
-        "No money will be released for this payment.",
-      ];
+        ? ['Payment needs attention', 'The payment did not complete. Try again or contact support.']
+        : ['Payment not secured', 'Do not begin work until the client payment is confirmed.'];
+    case 'CANCELLED':
+      return ['Payment cancelled', 'No money will be released for this payment.'];
     default:
-      return ["Payment update", "Refresh for the latest payment status."];
+      return ['Payment update', 'Refresh for the latest payment status.'];
   }
 }
 
 export default function TaskDetailScreen() {
-  const { id, paymentReturn, photoUploadFailed } = useLocalSearchParams<{
+  const { id, paymentReturn, photoUploadFailed, reminderId } = useLocalSearchParams<{
     id: string;
     paymentReturn?: string;
     photoUploadFailed?: string;
+    reminderId?: string;
+    reminderType?: 'ARRIVAL_PROGRESS' | 'JOURNEY_DELAY';
+    suggestedAction?: LifecycleReminderAction;
   }>();
   const router = useRouter();
   const { user } = useAuth();
@@ -225,46 +199,48 @@ export default function TaskDetailScreen() {
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [contactReady, setContactReady] = useState<boolean | null>(null);
   const [kycVerified, setKycVerified] = useState<boolean | null>(null);
-  const [readinessError, setReadinessError] = useState("");
+  const [readinessError, setReadinessError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
-  const [error, setError] = useState("");
-  const [proposedPrice, setProposedPrice] = useState("");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState('');
+  const [proposedPrice, setProposedPrice] = useState('');
+  const [message, setMessage] = useState('');
+  const [priceAdjustmentReason, setPriceAdjustmentReason] = useState('');
   const [selectedBid, setSelectedBid] = useState<TaskBid | null>(null);
   const [journeyPromptVisible, setJourneyPromptVisible] = useState(false);
   const [journeyPromptDismissed, setJourneyPromptDismissed] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
-  const [reviewComment, setReviewComment] = useState("");
+  const [reviewComment, setReviewComment] = useState('');
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [reviewPromptVisible, setReviewPromptVisible] = useState(false);
   const [reportReviewVisible, setReportReviewVisible] = useState(false);
-  const [reportReason, setReportReason] = useState("");
+  const [reportReason, setReportReason] = useState('');
   const [manualArrivalVisible, setManualArrivalVisible] = useState(false);
-  const [manualArrivalReason, setManualArrivalReason] = useState("");
+  const [manualArrivalReason, setManualArrivalReason] = useState('');
   const [sosVisible, setSosVisible] = useState(false);
-  const [sosNote, setSosNote] = useState("");
+  const [sosNote, setSosNote] = useState('');
+  const [lifecycleReminder, setLifecycleReminder] = useState<LifecycleReminder | null>(null);
+  const [cancellation, setCancellation] = useState<TaskCancellation | null>(null);
+  const [cancellationVisible, setCancellationVisible] = useState(false);
+  const [cancellationReason, setCancellationReason] =
+    useState<TaskCancellationReason>('NO_LONGER_NEEDED');
+  const [cancellationDetails, setCancellationDetails] = useState('');
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const handledReminderId = useRef<string | null>(null);
   const [briefPhotos, setBriefPhotos] = useState<LocalProfileImage[]>([]);
-  const [completionPhotos, setCompletionPhotos] = useState<LocalProfileImage[]>(
-    [],
-  );
-  const [lastCoordinate, setLastCoordinate] = useState<Coordinates | null>(
-    null,
-  );
+  const [completionPhotos, setCompletionPhotos] = useState<LocalProfileImage[]>([]);
+  const [lastCoordinate, setLastCoordinate] = useState<Coordinates | null>(null);
   const [reviewClock, setReviewClock] = useState(Date.now());
   const busy = busyAction !== null;
 
   const loadWorkerReadiness = useCallback(async () => {
     setKycVerified(null);
     setContactReady(null);
-    setReadinessError("");
+    setReadinessError('');
     try {
-      const [contact, kyc] = await Promise.all([
-        emergencyContactApi.current(),
-        kycApi.status(),
-      ]);
+      const [contact, kyc] = await Promise.all([emergencyContactApi.current(), kycApi.status()]);
       setContactReady(Boolean(contact));
-      setKycVerified(kyc.status === "VERIFIED");
+      setKycVerified(kyc.status === 'VERIFIED');
     } catch {
       setReadinessError(
         "We couldn't confirm your account readiness. This does not mean you are unverified.",
@@ -273,25 +249,26 @@ export default function TaskDetailScreen() {
   }, []);
 
   const refresh = useCallback(
-    async (silent = false) => {
+    async (silent = false, forceRefresh = false) => {
       if (!id) return;
       if (!silent) {
         setLoading(true);
-        setError("");
+        setError('');
       }
       try {
-        const next = await taskApi.detail(id);
+        const next = await taskApi.detail(id, forceRefresh);
         setTask(next);
-        if (user?.role === "RUNNER" && isOpen(next)) {
+        if (next.status === 'CANCELLED') {
+          void taskApi.cancellation(id).then(setCancellation).catch(() => undefined);
+        }
+        if (user?.role === 'RUNNER' && isOpen(next)) {
           void loadWorkerReadiness();
         }
         return next;
       } catch (cause) {
         if (!silent) {
           setError(
-            cause instanceof ApiError
-              ? cause.message
-              : "We couldn't load this task. Try again.",
+            cause instanceof ApiError ? cause.message : "We couldn't load this task. Try again.",
           );
         }
       } finally {
@@ -307,6 +284,76 @@ export default function TaskDetailScreen() {
     }, [refresh]),
   );
 
+  const clearLifecycleReminderRoute = useCallback(() => {
+    handledReminderId.current = null;
+    router.setParams({
+      reminderId: undefined,
+      reminderType: undefined,
+      suggestedAction: undefined,
+    });
+  }, [router]);
+
+  const dismissLifecycleReminder = useCallback(() => {
+    setLifecycleReminder(null);
+    clearLifecycleReminderRoute();
+  }, [clearLifecycleReminderRoute]);
+
+  useEffect(() => {
+    if (!id || !reminderId || handledReminderId.current === reminderId) return;
+    handledReminderId.current = reminderId;
+    setReminderBusy(true);
+    void taskApi
+      .lifecycleReminder(id, reminderId)
+      .then((reminder) => {
+        if (reminder.actionable) {
+          setLifecycleReminder(reminder);
+          return;
+        }
+        Alert.alert('Reminder already handled', reminder.message);
+        clearLifecycleReminderRoute();
+      })
+      .catch((cause) => {
+        Alert.alert(
+          'Reminder unavailable',
+          cause instanceof ApiError
+            ? cause.message
+            : "We couldn't load this reminder. Try opening it again.",
+        );
+        clearLifecycleReminderRoute();
+      })
+      .finally(() => setReminderBusy(false));
+  }, [clearLifecycleReminderRoute, id, reminderId]);
+
+  const respondToLifecycleReminder = useCallback(
+    async (action: LifecycleReminderAction) => {
+      if (!id || !lifecycleReminder || reminderBusy) return;
+      setReminderBusy(true);
+      try {
+        const result = await taskApi.respondToLifecycleReminder(id, lifecycleReminder.id, action);
+        dismissLifecycleReminder();
+        if (!result.responseRecorded) {
+          Alert.alert('Reminder already handled', result.message);
+          return;
+        }
+        if (action === 'OPEN_DISPUTE') {
+          router.push(`/dispute/${id}` as never);
+          return;
+        }
+        Alert.alert('Status shared', result.message);
+      } catch (cause) {
+        Alert.alert(
+          'Response not saved',
+          cause instanceof ApiError
+            ? cause.message
+            : "We couldn't save your response. Please try again.",
+        );
+      } finally {
+        setReminderBusy(false);
+      }
+    },
+    [dismissLifecycleReminder, id, lifecycleReminder, reminderBusy, router],
+  );
+
   const isOwner = task?.clientId === user?.id;
   const isAssigned = task?.assignedRunnerId === user?.id;
   const taskClosed = Boolean(task && closedTaskStatuses.has(task.status));
@@ -314,48 +361,60 @@ export default function TaskDetailScreen() {
     (isOwner || isAssigned) && task?.assignedRunnerId && !taskClosed,
   );
   const canUseSos = Boolean(
-    (isOwner || isAssigned) &&
-    !taskClosed &&
-    task?.arrivedAt &&
-    task.status === "ARRIVED",
+    (isOwner || isAssigned) && !taskClosed && task?.arrivedAt && task.status === 'ARRIVED',
   );
   const myBid = task?.bids.find((bid) => bid.runnerId === user?.id);
-  const validPrice =
-    /^\d+(?:\.\d{1,2})?$/.test(proposedPrice.trim()) &&
-    Number(proposedPrice) > 0;
+  const parsedProposedPrice = Number(proposedPrice);
   const matchesBudget = Boolean(
     task?.budget != null &&
     proposedPrice.trim() &&
-    Math.abs(Number(proposedPrice) - task.budget) < 0.005,
+    Math.abs(parsedProposedPrice - task.budget) < 0.005,
   );
-  const paymentCopy = task
-    ? paymentWording(task, Boolean(isOwner), Boolean(isAssigned))
-    : null;
+  const minimumApplicationPrice = task?.minimumApplicationPrice ?? null;
+  const maximumApplicationPrice = task?.maximumApplicationPrice ?? null;
+  const priceWithinRange = Boolean(
+    minimumApplicationPrice != null &&
+      maximumApplicationPrice != null &&
+      parsedProposedPrice >= minimumApplicationPrice &&
+      parsedProposedPrice <= maximumApplicationPrice,
+  );
+  const needsPriceReason = Boolean(proposedPrice.trim() && !matchesBudget);
+  const validPrice = Boolean(
+    /^\d+(?:\.\d{1,2})?$/.test(proposedPrice.trim()) &&
+      parsedProposedPrice > 0 &&
+      priceWithinRange &&
+      (!needsPriceReason || priceAdjustmentReason.trim().length >= 10),
+  );
+  const paymentCopy = task ? paymentWording(task, Boolean(isOwner), Boolean(isAssigned)) : null;
   const paymentSecured = Boolean(
-    task?.paymentStatus && ["HELD", "IN_PROGRESS"].includes(task.paymentStatus),
+    task?.paymentStatus && ['HELD', 'IN_PROGRESS'].includes(task.paymentStatus),
   );
   const paymentFrozen = Boolean(
-    task && (task.paymentStatus === "DISPUTED" || task.status === "DISPUTED"),
+    task && (task.paymentStatus === 'DISPUTED' || task.status === 'DISPUTED'),
   );
-  const paymentReleased = task?.paymentStatus === "RELEASED";
-  const canReview = Boolean(
-    (isOwner || isAssigned) && task?.status === "PAID" && paymentReleased,
-  );
+  const paymentReleased = task?.paymentStatus === 'RELEASED';
+  const canReview = Boolean((isOwner || isAssigned) && task?.status === 'PAID' && paymentReleased);
   const mySubmittedReview = task?.myReview ?? null;
   const reviewSubject = isOwner
-    ? (task?.assignedRunnerName?.split(" ")[0] ?? "your worker")
-    : (task?.clientName?.split(" ")[0] ?? "the client");
+    ? (task?.assignedRunnerName?.split(' ')[0] ?? 'your worker')
+    : (task?.clientName?.split(' ')[0] ?? 'the client');
   const journeyStartRequired = Boolean(
     isAssigned &&
-    task?.paymentStatus === "HELD" &&
-    (task.status === "ACCEPTED" || task.status === "IN_PROGRESS") &&
+    task?.paymentStatus === 'HELD' &&
+    (task.status === 'ACCEPTED' || task.status === 'IN_PROGRESS') &&
     !task.enRouteAt,
   );
   const journeyResumeRequired = Boolean(
     isAssigned &&
-    task?.paymentStatus === "HELD" &&
-    task.status === "EN_ROUTE" &&
+    task?.paymentStatus === 'HELD' &&
+    task.status === 'EN_ROUTE' &&
     !task.locationSharingEnabled,
+  );
+  const canCancelTask = Boolean(
+    isOwner &&
+      task &&
+      !task.disputeStatus &&
+      ['POSTED', 'BID_RECEIVED', 'ACCEPTED', 'IN_PROGRESS', 'EN_ROUTE'].includes(task.status),
   );
   const reviewCountdown = task
     ? reviewTimeRemaining(task.completionReviewDeadlineAt, reviewClock)
@@ -381,22 +440,26 @@ export default function TaskDetailScreen() {
     if (
       (!isOwner && !isAssigned) ||
       !task?.locationSharingEnabled ||
-      (task.status !== "EN_ROUTE" && task.status !== "ARRIVED")
+      (task.status !== 'EN_ROUTE' && task.status !== 'ARRIVED')
     )
       return;
     const timer = setInterval(() => void refresh(true), 15_000);
     return () => clearInterval(timer);
-  }, [
-    isAssigned,
-    isOwner,
-    refresh,
-    task?.locationSharingEnabled,
-    task?.status,
-  ]);
+  }, [isAssigned, isOwner, refresh, task?.locationSharingEnabled, task?.status]);
 
   useEffect(() => {
-    if (!task?.completionReviewDeadlineAt || task.status !== "COMPLETED")
-      return;
+    const disputeStillChanging =
+      task?.status === 'DISPUTED' ||
+      task?.paymentStatus === 'DISPUTED' ||
+      task?.paymentStatus === 'REFUND_PENDING';
+    if (!disputeStillChanging) return;
+
+    const timer = setInterval(() => void refresh(true), 10_000);
+    return () => clearInterval(timer);
+  }, [refresh, task?.paymentStatus, task?.status]);
+
+  useEffect(() => {
+    if (!task?.completionReviewDeadlineAt || task.status !== 'COMPLETED') return;
     setReviewClock(Date.now());
     const timer = setInterval(() => setReviewClock(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -408,18 +471,17 @@ export default function TaskDetailScreen() {
     setReviewPromptVisible(false);
     setReviewDismissed(false);
     setReviewRating(0);
-    setReviewComment("");
+    setReviewComment('');
   }, [id]);
 
   useEffect(() => {
     if (canUseSos) return;
     setSosVisible(false);
-    setSosNote("");
+    setSosNote('');
   }, [canUseSos]);
 
   useEffect(() => {
-    if (journeyStartRequired && !journeyPromptDismissed)
-      setJourneyPromptVisible(true);
+    if (journeyStartRequired && !journeyPromptDismissed) setJourneyPromptVisible(true);
     if (!journeyStartRequired) setJourneyPromptVisible(false);
   }, [journeyPromptDismissed, journeyStartRequired]);
 
@@ -427,7 +489,7 @@ export default function TaskDetailScreen() {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (!permission.granted) {
       throw new Error(
-        "Allow precise location so TaskGrid can calculate travel time and support journey check-in.",
+        'Allow precise location so TaskGrid can calculate travel time and support journey check-in.',
       );
     }
     const position = await Location.getCurrentPositionAsync({
@@ -441,23 +503,23 @@ export default function TaskDetailScreen() {
     return coordinates;
   }
 
-  async function journeyAction(action: "start" | "arrive" | "stop") {
+  async function journeyAction(action: 'start' | 'arrive' | 'stop') {
     if (!task || busy) return;
     setBusyAction(`journey-${action}`);
-    setError("");
+    setError('');
     try {
-      if (action === "stop") {
+      if (action === 'stop') {
         try {
           await taskApi.stopSharing(task.id);
         } finally {
           await stopJourneyLocationTracking();
         }
       } else {
-        if (action === "start") await requestJourneyLocationPermissions();
+        if (action === 'start') await requestJourneyLocationPermissions();
         const coordinates = await currentCoordinates();
-        if (action === "start") {
+        if (action === 'start') {
           const journey = await taskApi.startJourney(task.id, coordinates);
-          if (journey.sharing && journey.taskStatus === "EN_ROUTE") {
+          if (journey.sharing && journey.taskStatus === 'EN_ROUTE') {
             try {
               await startJourneyLocationTracking(task.id);
             } catch {
@@ -478,11 +540,11 @@ export default function TaskDetailScreen() {
           await stopJourneyLocationTracking();
         }
       }
-      await refresh();
+      await refresh(false, true);
     } catch (cause) {
-      if (action === "arrive" && !(cause instanceof ApiError)) {
+      if (action === 'arrive' && !(cause instanceof ApiError)) {
         setManualArrivalVisible(true);
-        setError("");
+        setError('');
         return;
       }
       setError(
@@ -497,13 +559,13 @@ export default function TaskDetailScreen() {
 
   async function submitManualArrival() {
     if (!task || manualArrivalReason.trim().length < 10 || busy) return;
-    setBusyAction("manual-arrival");
-    setError("");
+    setBusyAction('manual-arrival');
+    setError('');
     try {
       await taskApi.arriveManually(task.id, manualArrivalReason);
       await stopJourneyLocationTracking();
       setManualArrivalVisible(false);
-      setManualArrivalReason("");
+      setManualArrivalReason('');
       await refresh();
     } catch (cause) {
       setError(
@@ -518,23 +580,19 @@ export default function TaskDetailScreen() {
 
   async function sendSos() {
     if (!task || busy) return;
-    setBusyAction("sos");
-    setError("");
+    setBusyAction('sos');
+    setError('');
     try {
       const contact = await emergencyContactApi.current();
       if (!contact) {
         setSosVisible(false);
-        Alert.alert(
-          "Emergency contact required",
-          "Add a trusted contact before using SOS.",
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Add contact",
-              onPress: () => router.push("/emergency-contact"),
-            },
-          ],
-        );
+        Alert.alert('Emergency contact required', 'Add a trusted contact before using SOS.', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Add contact',
+            onPress: () => router.push('/emergency-contact'),
+          },
+        ]);
         return;
       }
 
@@ -561,29 +619,22 @@ export default function TaskDetailScreen() {
         message: sosNote.trim() || undefined,
       });
       setSosVisible(false);
-      setSosNote("");
+      setSosNote('');
       Alert.alert(
-        result.smsDeliveredToProvider
-          ? "Emergency SMS queued"
-          : "SMS could not be sent",
+        result.smsDeliveredToProvider ? 'Emergency SMS queued' : 'SMS could not be sent',
         result.message,
         result.smsDeliveredToProvider
-          ? [{ text: "OK" }]
+          ? [{ text: 'OK' }]
           : [
-              { text: "Close", style: "cancel" },
+              { text: 'Close', style: 'cancel' },
               {
                 text: `Call ${result.contactName}`,
-                onPress: () =>
-                  void Linking.openURL(`tel:${result.contactPhone}`),
+                onPress: () => void Linking.openURL(`tel:${result.contactPhone}`),
               },
             ],
       );
     } catch (cause) {
-      setError(
-        cause instanceof ApiError
-          ? cause.message
-          : "We couldn't send the SOS alert.",
-      );
+      setError(cause instanceof ApiError ? cause.message : "We couldn't send the SOS alert.");
     } finally {
       setBusyAction(null);
     }
@@ -591,23 +642,22 @@ export default function TaskDetailScreen() {
 
   async function apply() {
     if (!task || !validPrice || busy) return;
-    setBusyAction("apply");
-    setError("");
+    setBusyAction('apply');
+    setError('');
     try {
       const coordinates = await currentCoordinates();
       setTask(
         await taskApi.apply(
           task.id,
-          Number(proposedPrice),
+          parsedProposedPrice,
           coordinates,
           message.trim(),
+          priceAdjustmentReason,
         ),
       );
     } catch (cause) {
       setError(
-        cause instanceof ApiError
-          ? cause.message
-          : "We couldn't send your application. Try again.",
+        cause instanceof ApiError ? cause.message : "We couldn't send your application. Try again.",
       );
     } finally {
       setBusyAction(null);
@@ -616,16 +666,14 @@ export default function TaskDetailScreen() {
 
   async function accept() {
     if (!task || !selectedBid || busy) return;
-    setBusyAction("accept");
-    setError("");
+    setBusyAction('accept');
+    setError('');
     try {
       setTask(await taskApi.accept(task.id, selectedBid.id));
       setSelectedBid(null);
     } catch (cause) {
       setError(
-        cause instanceof ApiError
-          ? cause.message
-          : "We couldn't accept this worker. Try again.",
+        cause instanceof ApiError ? cause.message : "We couldn't accept this worker. Try again.",
       );
     } finally {
       setBusyAction(null);
@@ -634,29 +682,45 @@ export default function TaskDetailScreen() {
 
   async function checkout() {
     if (!task || busy) return;
-    setBusyAction("checkout");
-    setError("");
+    setBusyAction('checkout');
+    setError('');
     try {
       const payment = await taskApi.initializePayment(task.id);
       if (
         !payment.checkoutUrl ||
         !/^https:\/\/checkout\.paystack\.com\//i.test(payment.checkoutUrl)
       ) {
-        throw new Error("Invalid checkout URL");
+        throw new Error('Invalid checkout URL');
       }
       const returnUrl = `taskgridmobile:///task/${task.id}?paymentReturn=true`;
-      const browserResult = await WebBrowser.openAuthSessionAsync(
-        payment.checkoutUrl,
-        returnUrl,
-      );
-      if (browserResult.type === "success") {
+      const browserResult = await WebBrowser.openAuthSessionAsync(payment.checkoutUrl, returnUrl);
+      if (browserResult.type === 'success') {
         for (let attempt = 0; attempt < 4; attempt++) {
           const updated = await refresh();
-          if (updated?.paymentStatus && updated.paymentStatus !== "INITIALIZED")
-            break;
-          if (attempt < 3)
-            await new Promise((resolve) => setTimeout(resolve, 1200));
+          if (updated?.paymentStatus && updated.paymentStatus !== 'INITIALIZED') break;
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1200));
         }
+      } else {
+        await refresh();
+      }
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError ? cause.message : "We couldn't open secure checkout. Try again.",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function openCancellation() {
+    if (!task || busy) return;
+    setBusyAction('cancel-task');
+    setError('');
+    try {
+      const quote = await taskApi.cancellationQuote(task.id);
+      setCancellation(quote);
+      if (quote.canConfirm) {
+        setCancellationVisible(true);
       } else {
         await refresh();
       }
@@ -664,8 +728,39 @@ export default function TaskDetailScreen() {
       setError(
         cause instanceof ApiError
           ? cause.message
-          : "We couldn't open secure checkout. Try again.",
+          : "We couldn't prepare the cancellation. Try again.",
       );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function confirmCancellation() {
+    if (!task || !cancellation || busy) return;
+    if (cancellationReason === 'OTHER' && cancellationDetails.trim().length < 10) {
+      setError('Add a short explanation when choosing another reason.');
+      return;
+    }
+    setBusyAction('cancel-task');
+    setError('');
+    try {
+      const result = await taskApi.cancel(
+        task.id,
+        cancellation.quoteId,
+        cancellationReason,
+        cancellationDetails,
+      );
+      setCancellation(result);
+      setCancellationVisible(false);
+      await refresh(false, true);
+      Alert.alert(
+        'Task cancelled',
+        result.refundPending
+          ? 'Your refund is being processed. We will update the task when it is complete.'
+          : 'The task has been cancelled.',
+      );
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : "We couldn't cancel this task.");
     } finally {
       setBusyAction(null);
     }
@@ -673,23 +768,17 @@ export default function TaskDetailScreen() {
 
   async function addBriefPhotos() {
     if (!task || briefPhotos.length === 0 || busy) return;
-    setBusyAction("brief-upload");
-    setError("");
+    setBusyAction('brief-upload');
+    setError('');
     try {
       for (const photo of briefPhotos) {
         await taskApi.uploadBriefImage(task.id, photo);
-        setBriefPhotos((current) =>
-          current.filter((item) => item.uri !== photo.uri),
-        );
+        setBriefPhotos((current) => current.filter((item) => item.uri !== photo.uri));
       }
       await refresh();
     } catch (cause) {
       await refresh();
-      setError(
-        cause instanceof ApiError
-          ? cause.message
-          : "We couldn't upload all task photos.",
-      );
+      setError(cause instanceof ApiError ? cause.message : "We couldn't upload all task photos.");
     } finally {
       setBusyAction(null);
     }
@@ -697,23 +786,16 @@ export default function TaskDetailScreen() {
 
   async function complete() {
     if (!task || busy) return;
-    if (
-      (task.completionImages?.length ?? 0) === 0 &&
-      completionPhotos.length === 0
-    ) {
-      setError(
-        "Add at least one clear completion photo before marking the task complete.",
-      );
+    if ((task.completionImages?.length ?? 0) === 0 && completionPhotos.length === 0) {
+      setError('Add at least one clear completion photo before marking the task complete.');
       return;
     }
-    setBusyAction("complete");
-    setError("");
+    setBusyAction('complete');
+    setError('');
     try {
       for (const photo of completionPhotos) {
         await taskApi.uploadCompletionImage(task.id, photo);
-        setCompletionPhotos((current) =>
-          current.filter((item) => item.uri !== photo.uri),
-        );
+        setCompletionPhotos((current) => current.filter((item) => item.uri !== photo.uri));
       }
       await taskApi.complete(task.id);
       await refresh();
@@ -731,19 +813,17 @@ export default function TaskDetailScreen() {
 
   async function confirm() {
     if (!task || busy) return;
-    setBusyAction("confirm");
-    setError("");
+    setBusyAction('confirm');
+    setError('');
     try {
       await taskApi.confirm(task.id);
       const updated = await refresh();
-      if (updated?.status === "PAID" && !updated.myReview) {
+      if (updated?.status === 'PAID' && !updated.myReview) {
         setReviewPromptVisible(true);
       }
     } catch (cause) {
       setError(
-        cause instanceof ApiError
-          ? cause.message
-          : "We couldn't confirm completion. Try again.",
+        cause instanceof ApiError ? cause.message : "We couldn't confirm completion. Try again.",
       );
     } finally {
       setBusyAction(null);
@@ -752,8 +832,8 @@ export default function TaskDetailScreen() {
 
   async function submitReview() {
     if (!task || reviewRating < 1 || busy) return;
-    setBusyAction("review");
-    setError("");
+    setBusyAction('review');
+    setError('');
     try {
       const review = await taskApi.review(task.id, reviewRating, reviewComment);
       setTask((current) =>
@@ -765,14 +845,10 @@ export default function TaskDetailScreen() {
             }
           : current,
       );
-      setReviewComment("");
+      setReviewComment('');
       setReviewPromptVisible(false);
     } catch (cause) {
-      setError(
-        cause instanceof ApiError
-          ? cause.message
-          : "We couldn't publish your review.",
-      );
+      setError(cause instanceof ApiError ? cause.message : "We couldn't publish your review.");
     } finally {
       setBusyAction(null);
     }
@@ -780,19 +856,15 @@ export default function TaskDetailScreen() {
 
   async function reportReview() {
     if (!task?.review || reportReason.trim().length < 10 || busy) return;
-    setBusyAction("report-review");
-    setError("");
+    setBusyAction('report-review');
+    setError('');
     try {
       const review = await taskApi.reportReview(task.review.id, reportReason);
       setTask((current) => (current ? { ...current, review } : current));
-      setReportReason("");
+      setReportReason('');
       setReportReviewVisible(false);
     } catch (cause) {
-      setError(
-        cause instanceof ApiError
-          ? cause.message
-          : "We couldn't report this review.",
-      );
+      setError(cause instanceof ApiError ? cause.message : "We couldn't report this review.");
     } finally {
       setBusyAction(null);
     }
@@ -800,74 +872,51 @@ export default function TaskDetailScreen() {
 
   return (
     <Screen contentStyle={styles.screen} keyboard>
-      <AuthHeader
-        title="Task details"
-        subtitle="Follow this task from application to payment."
-      />
+      <AuthHeader title="Task details" subtitle="Follow this task from application to payment." />
       {loading && !task ? <TaskDetailSkeleton /> : null}
       {error ? (
         <SurfaceCard style={styles.notice}>
           <AppText color={colors.danger}>{error}</AppText>
-          <Button
-            label="Refresh task"
-            variant="secondary"
-            onPress={() => void refresh()}
-          />
+          <Button label="Refresh task" variant="secondary" onPress={() => void refresh()} />
         </SurfaceCard>
       ) : null}
-      {paymentReturn === "true" && task?.paymentStatus === "INITIALIZED" ? (
+      {paymentReturn === 'true' && task?.paymentStatus === 'INITIALIZED' ? (
         <SurfaceCard style={styles.notice}>
           <AppText variant="subtitle">Confirming your payment</AppText>
           <AppText color={colors.textSecondary}>
-            You’re back in TaskGrid. Paystack is confirming the payment
-            securely. This screen will show when the money is held for the task.
+            You’re back in TaskGrid. Paystack is confirming the payment securely. This screen will
+            show when the money is held for the task.
           </AppText>
         </SurfaceCard>
       ) : null}
-      {photoUploadFailed === "true" ? (
+      {photoUploadFailed === 'true' ? (
         <SurfaceCard style={styles.notice}>
-          <AppText variant="subtitle">
-            Task posted, but some photos need attention
-          </AppText>
+          <AppText variant="subtitle">Task posted, but some photos need attention</AppText>
           <AppText color={colors.textSecondary}>
-            Your task is live. You can add the remaining photos below while
-            applications are open.
+            Your task is live. You can add the remaining photos below while applications are open.
           </AppText>
         </SurfaceCard>
       ) : null}
       {task ? (
         <>
           <AnimatedEntrance>
-            <View
-              style={[styles.hero, { backgroundColor: colors.primarySoft }]}
-            >
-              <View
-                style={[styles.heroOrb, { backgroundColor: colors.primary }]}
-              />
+            <View style={[styles.hero, { backgroundColor: colors.primarySoft }]}>
+              <View style={[styles.heroOrb, { backgroundColor: colors.primary }]} />
               <AppText variant="eyebrow" color={colors.primary}>
                 {task.category}
               </AppText>
               <AppText variant="title" style={styles.heroTitle}>
                 {task.title}
               </AppText>
-              <AppText color={colors.textSecondary}>
-                {task.locationDescription}
-              </AppText>
+              <AppText color={colors.textSecondary}>{task.locationDescription}</AppText>
               <View style={styles.heroFooter}>
                 <View>
                   <AppText variant="caption" color={colors.textMuted}>
-                    {task.acceptedPrice ? "Agreed price" : "Budget"}
+                    {task.acceptedPrice ? 'Agreed price' : 'Budget'}
                   </AppText>
-                  <AppText variant="title">
-                    {money(task.acceptedPrice ?? task.budget)}
-                  </AppText>
+                  <AppText variant="title">{money(task.acceptedPrice ?? task.budget)}</AppText>
                 </View>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { backgroundColor: colors.surface },
-                  ]}
-                >
+                <View style={[styles.statusBadge, { backgroundColor: colors.surface }]}>
                   <AppText variant="caption" color={colors.primary}>
                     {label(task.status)}
                   </AppText>
@@ -890,23 +939,21 @@ export default function TaskDetailScreen() {
           {taskLocation &&
           (isOwner || isAssigned) &&
           task.assignedRunnerId &&
-          task.status === "EN_ROUTE" ? (
+          task.status === 'EN_ROUTE' ? (
             <TaskJourneyMap
               taskLocation={taskLocation}
               workerLocation={
-                isAssigned
-                  ? (lastCoordinate ?? sharedWorkerLocation)
-                  : sharedWorkerLocation
+                isAssigned ? (lastCoordinate ?? sharedWorkerLocation) : sharedWorkerLocation
               }
               updatedAt={task.runnerLocationUpdatedAt}
               distanceToTaskMetres={task.runnerDistanceToTaskMetres}
               estimatedTravelMinutes={task.runnerEstimatedTravelMinutes}
               onStopSharing={
                 isAssigned && task.locationSharingEnabled
-                  ? () => void journeyAction("stop")
+                  ? () => void journeyAction('stop')
                   : undefined
               }
-              stopping={busyAction === "journey-stop"}
+              stopping={busyAction === 'journey-stop'}
             />
           ) : null}
           {canUseTaskConversation ? (
@@ -916,7 +963,7 @@ export default function TaskDetailScreen() {
                 accessibilityLabel="Open task conversation"
                 onPress={() =>
                   router.push({
-                    pathname: "/task/[id]/chat",
+                    pathname: '/task/[id]/chat',
                     params: { id: task.id },
                   } as never)
                 }
@@ -934,15 +981,10 @@ export default function TaskDetailScreen() {
                     Task conversation
                   </AppText>
                   <AppText variant="bodyMedium">
-                    Message{" "}
-                    {isOwner ? reviewSubject : task.clientName.split(" ")[0]}
+                    Message {isOwner ? reviewSubject : task.clientName.split(' ')[0]}
                   </AppText>
                 </View>
-                <Ionicons
-                  name="arrow-forward"
-                  size={21}
-                  color={colors.primary}
-                />
+                <Ionicons name="arrow-forward" size={21} color={colors.primary} />
               </Pressable>
               {canUseSos ? (
                 <Pressable
@@ -958,11 +1000,7 @@ export default function TaskDetailScreen() {
                     },
                   ]}
                 >
-                  <Ionicons
-                    name="alert"
-                    size={22}
-                    color={colors.textOnPrimary}
-                  />
+                  <Ionicons name="alert" size={22} color={colors.textOnPrimary} />
                   <AppText variant="caption" color={colors.textOnPrimary}>
                     SOS
                   </AppText>
@@ -976,17 +1014,9 @@ export default function TaskDetailScreen() {
                 colors={[colors.primarySoft, colors.surface]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={[
-                  styles.journeyNext,
-                  { borderColor: `${colors.primary}35` },
-                ]}
+                style={[styles.journeyNext, { borderColor: `${colors.primary}35` }]}
               >
-                <View
-                  style={[
-                    styles.journeyNumber,
-                    { backgroundColor: colors.primary },
-                  ]}
-                >
+                <View style={[styles.journeyNumber, { backgroundColor: colors.primary }]}>
                   <AppText variant="subtitle" color={colors.textOnPrimary}>
                     1
                   </AppText>
@@ -995,48 +1025,31 @@ export default function TaskDetailScreen() {
                   Your next step
                 </AppText>
                 <AppText variant="title" style={styles.journeyNextTitle}>
-                  {journeyResumeRequired
-                    ? "Resume journey sharing"
-                    : "Start your journey"}
+                  {journeyResumeRequired ? 'Resume journey sharing' : 'Start your journey'}
                 </AppText>
-                <AppText
-                  color={colors.textSecondary}
-                  style={styles.journeyNextDescription}
-                >
+                <AppText color={colors.textSecondary} style={styles.journeyNextDescription}>
                   {journeyResumeRequired
-                    ? "Turn location sharing back on so the client can follow your progress and receive your arrival update."
-                    : "The client has paid. Start your journey before leaving so TaskGrid can guide arrival check-in and keep the client updated."}
+                    ? 'Turn location sharing back on so the client can follow your progress and receive your arrival update.'
+                    : 'The client has paid. Start your journey before leaving so TaskGrid can guide arrival check-in and keep the client updated.'}
                 </AppText>
-                <AppText
-                  variant="caption"
-                  color={colors.textMuted}
-                  style={styles.privacyCopy}
-                >
-                  With your permission, sharing continues if you lock your phone
-                  or briefly use another app. Android keeps a visible
-                  notification on screen. Sharing ends when you arrive, stop it,
-                  or the task ends.
+                <AppText variant="caption" color={colors.textMuted} style={styles.privacyCopy}>
+                  With your permission, sharing continues if you lock your phone or briefly use
+                  another app. Android keeps a visible notification on screen. Sharing ends when you
+                  arrive, stop it, or the task ends.
                 </AppText>
                 <Button
-                  label={
-                    journeyResumeRequired ? "Resume sharing" : "Start journey"
-                  }
+                  label={journeyResumeRequired ? 'Resume sharing' : 'Start journey'}
                   icon="navigate-outline"
                   onPress={() => setJourneyPromptVisible(true)}
-                  loading={busyAction === "journey-start"}
+                  loading={busyAction === 'journey-start'}
                 />
               </LinearGradient>
             </AnimatedEntrance>
           ) : null}
           {(isOwner || isAssigned) &&
-          task.status === "ARRIVED" &&
-          task.arrivalVerificationMethod === "MANUAL" ? (
-            <View
-              style={[
-                styles.manualArrivalNotice,
-                { borderLeftColor: colors.warning },
-              ]}
-            >
+          task.status === 'ARRIVED' &&
+          task.arrivalVerificationMethod === 'MANUAL' ? (
+            <View style={[styles.manualArrivalNotice, { borderLeftColor: colors.warning }]}>
               <AppText variant="eyebrow" color={colors.warning}>
                 Manual arrival report
               </AppText>
@@ -1046,15 +1059,10 @@ export default function TaskDetailScreen() {
             </View>
           ) : null}
           {isAssigned &&
-          task.paymentStatus === "HELD" &&
-          task.status === "EN_ROUTE" &&
+          task.paymentStatus === 'HELD' &&
+          task.status === 'EN_ROUTE' &&
           task.locationSharingEnabled ? (
-            <View
-              style={[
-                styles.arrivalPrompt,
-                { borderBottomColor: colors.divider },
-              ]}
-            >
+            <View style={[styles.arrivalPrompt, { borderBottomColor: colors.divider }]}>
               <View style={styles.arrivalCopy}>
                 <AppText variant="eyebrow" color={colors.primary}>
                   At the task location?
@@ -1066,26 +1074,21 @@ export default function TaskDetailScreen() {
               <Button
                 label="I've arrived"
                 icon="location-outline"
-                onPress={() => void journeyAction("arrive")}
-                loading={busyAction === "journey-arrive"}
+                onPress={() => void journeyAction('arrive')}
+                loading={busyAction === 'journey-arrive'}
               />
             </View>
           ) : null}
           <AnimatedEntrance delay={60}>
-            <View
-              style={[
-                styles.taskOverview,
-                { borderBottomColor: colors.divider },
-              ]}
-            >
+            <View style={[styles.taskOverview, { borderBottomColor: colors.divider }]}>
               <View style={styles.overviewHeading}>
                 <AppText variant="subtitle">What needs doing</AppText>
                 <AppText variant="caption" color={colors.textMuted}>
-                  {task.urgencyLevel === "HIGH"
-                    ? "Soon"
-                    : task.urgencyLevel === "EMERGENCY"
-                      ? "Emergency"
-                      : "Flexible"}
+                  {task.urgencyLevel === 'HIGH'
+                    ? 'Soon'
+                    : task.urgencyLevel === 'EMERGENCY'
+                      ? 'Emergency'
+                      : 'Flexible'}
                 </AppText>
               </View>
               <AppText color={colors.textSecondary} style={styles.description}>
@@ -1093,18 +1096,13 @@ export default function TaskDetailScreen() {
               </AppText>
               {task.scheduledStartAt ? (
                 <AppText variant="caption" color={colors.textMuted}>
-                  Scheduled:{" "}
-                  {new Date(task.scheduledStartAt).toLocaleString("en-NG")}
+                  Scheduled: {new Date(task.scheduledStartAt).toLocaleString('en-NG')}
                 </AppText>
               ) : null}
               {isOwner && task.assignedRunnerName ? (
-                <AppText variant="bodyMedium">
-                  Worker: {task.assignedRunnerName}
-                </AppText>
+                <AppText variant="bodyMedium">Worker: {task.assignedRunnerName}</AppText>
               ) : isAssigned ? (
-                <AppText variant="bodyMedium">
-                  Client: {task.clientName}
-                </AppText>
+                <AppText variant="bodyMedium">Client: {task.clientName}</AppText>
               ) : null}
             </View>
           </AnimatedEntrance>
@@ -1127,32 +1125,22 @@ export default function TaskDetailScreen() {
                 <Button
                   label="Upload selected photos"
                   onPress={addBriefPhotos}
-                  loading={busyAction === "brief-upload"}
+                  loading={busyAction === 'brief-upload'}
                 />
               ) : null}
             </SurfaceCard>
           ) : null}
 
           {task.paymentStatus &&
-          !(
-            task.status === "COMPLETED" && task.paymentStatus === "COMPLETED"
-          ) ? (
+          !(task.status === 'COMPLETED' && task.paymentStatus === 'COMPLETED') ? (
             paymentFrozen ? (
               <AnimatedEntrance delay={80}>
-                <View
-                  style={[
-                    styles.frozenPayment,
-                    { borderTopColor: colors.warning },
-                  ]}
-                >
+                <View style={[styles.frozenPayment, { borderTopColor: colors.warning }]}>
                   <AppText variant="eyebrow" color={colors.warning}>
                     Funds paused · Dispute in review
                   </AppText>
                   <AppText variant="subtitle">{paymentCopy?.[0]}</AppText>
-                  <AppText
-                    color={colors.textSecondary}
-                    style={styles.frozenPaymentDescription}
-                  >
+                  <AppText color={colors.textSecondary} style={styles.frozenPaymentDescription}>
                     {paymentCopy?.[1]}
                   </AppText>
                 </View>
@@ -1163,33 +1151,18 @@ export default function TaskDetailScreen() {
                   colors={[colors.successSoft, colors.surface]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
-                  style={[
-                    styles.securedPayment,
-                    { borderColor: `${colors.success}35` },
-                  ]}
+                  style={[styles.securedPayment, { borderColor: `${colors.success}35` }]}
                 >
                   <View
                     pointerEvents="none"
-                    style={[
-                      styles.securedGlow,
-                      { backgroundColor: colors.success },
-                    ]}
+                    style={[styles.securedGlow, { backgroundColor: colors.success }]}
                   />
                   <View style={styles.securedHeader}>
                     <AppText variant="eyebrow" color={colors.success}>
                       Protected payment
                     </AppText>
-                    <View
-                      style={[
-                        styles.securedSeal,
-                        { backgroundColor: colors.success },
-                      ]}
-                    >
-                      <Ionicons
-                        name="shield-checkmark"
-                        size={24}
-                        color="#FFFFFF"
-                      />
+                    <View style={[styles.securedSeal, { backgroundColor: colors.success }]}>
+                      <Ionicons name="shield-checkmark" size={24} color="#FFFFFF" />
                     </View>
                   </View>
 
@@ -1197,37 +1170,17 @@ export default function TaskDetailScreen() {
                     {money(task.acceptedPrice ?? task.budget)}
                   </AppText>
                   <AppText variant="subtitle">
-                    {isOwner
-                      ? "Your payment is secured"
-                      : "Your earnings are secured"}
+                    {isOwner ? 'Your payment is secured' : 'Your earnings are secured'}
                   </AppText>
-                  <AppText
-                    color={colors.textSecondary}
-                    style={styles.securedDescription}
-                  >
+                  <AppText color={colors.textSecondary} style={styles.securedDescription}>
                     {paymentCopy?.[1]}
                   </AppText>
 
-                  <View
-                    style={[
-                      styles.paymentJourney,
-                      { borderTopColor: colors.divider },
-                    ]}
-                  >
+                  <View style={[styles.paymentJourney, { borderTopColor: colors.divider }]}>
                     <View style={styles.journeyStep}>
                       <View style={styles.journeyMarker}>
-                        <View
-                          style={[
-                            styles.journeyDot,
-                            { backgroundColor: colors.success },
-                          ]}
-                        />
-                        <View
-                          style={[
-                            styles.journeyLine,
-                            { backgroundColor: colors.success },
-                          ]}
-                        />
+                        <View style={[styles.journeyDot, { backgroundColor: colors.success }]} />
+                        <View style={[styles.journeyLine, { backgroundColor: colors.success }]} />
                       </View>
                       <View style={styles.journeyCopy}>
                         <AppText variant="bodyMedium">Payment received</AppText>
@@ -1251,9 +1204,7 @@ export default function TaskDetailScreen() {
                       </View>
                       <View style={styles.journeyCopy}>
                         <AppText variant="bodyMedium">
-                          {isOwner
-                            ? "Release after your approval"
-                            : "Available after approval"}
+                          {isOwner ? 'Release after your approval' : 'Available after approval'}
                         </AppText>
                         <AppText variant="caption" color={colors.textMuted}>
                           After the work is completed and reviewed
@@ -1278,27 +1229,15 @@ export default function TaskDetailScreen() {
                       Task settled
                     </AppText>
                     <View style={styles.releasedCheck}>
-                      <Ionicons
-                        name="checkmark"
-                        size={25}
-                        color={colors.primary}
-                      />
+                      <Ionicons name="checkmark" size={25} color={colors.primary} />
                     </View>
                   </View>
 
-                  <AppText
-                    variant="display"
-                    color="#FFFFFF"
-                    style={styles.releasedAmount}
-                  >
+                  <AppText variant="display" color="#FFFFFF" style={styles.releasedAmount}>
                     {money(task.acceptedPrice ?? task.budget)}
                   </AppText>
-                  <AppText
-                    variant="title"
-                    color="#FFFFFF"
-                    style={styles.releasedTitle}
-                  >
-                    {isOwner ? "Payment released" : "Earnings are ready"}
+                  <AppText variant="title" color="#FFFFFF" style={styles.releasedTitle}>
+                    {isOwner ? 'Payment released' : 'Earnings are ready'}
                   </AppText>
                   <AppText color="#FFFFFFD9" style={styles.releasedDescription}>
                     {paymentCopy?.[1]}
@@ -1307,29 +1246,21 @@ export default function TaskDetailScreen() {
                   <View style={styles.releasedDestination}>
                     <View style={styles.releasedDestinationCopy}>
                       <AppText variant="caption" color="#FFFFFFB8">
-                        {isOwner ? "Released to" : "Available balance"}
+                        {isOwner ? 'Released to' : 'Available balance'}
                       </AppText>
                       <AppText variant="bodyMedium" color="#FFFFFF">
                         {isOwner
-                          ? (task.assignedRunnerName ?? "Your worker")
-                          : "Ready in your TaskGrid wallet"}
+                          ? (task.assignedRunnerName ?? 'Your worker')
+                          : 'Ready in your TaskGrid wallet'}
                       </AppText>
                     </View>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={25}
-                      color="#FFFFFF"
-                    />
+                    <Ionicons name="checkmark-circle" size={25} color="#FFFFFF" />
                   </View>
                 </LinearGradient>
               </AnimatedEntrance>
             ) : (
               <SurfaceCard style={styles.paymentCard}>
-                <Ionicons
-                  name="shield-checkmark-outline"
-                  size={23}
-                  color={colors.primary}
-                />
+                <Ionicons name="shield-checkmark-outline" size={23} color={colors.primary} />
                 <View style={styles.paymentCopy}>
                   <AppText variant="bodyMedium">{paymentCopy?.[0]}</AppText>
                   <AppText variant="caption" color={colors.textMuted}>
@@ -1346,10 +1277,7 @@ export default function TaskDetailScreen() {
                 colors={[colors.warningSoft, colors.surface]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={[
-                  styles.reviewInvitation,
-                  { borderColor: `${colors.warning}35` },
-                ]}
+                style={[styles.reviewInvitation, { borderColor: `${colors.warning}35` }]}
               >
                 <Ionicons
                   pointerEvents="none"
@@ -1364,25 +1292,22 @@ export default function TaskDetailScreen() {
                 <AppText variant="title" style={styles.reviewInvitationTitle}>
                   How was working with {reviewSubject}?
                 </AppText>
-                <AppText
-                  color={colors.textSecondary}
-                  style={styles.reviewInvitationLead}
-                >
+                <AppText color={colors.textSecondary} style={styles.reviewInvitationLead}>
                   {isOwner
-                    ? "Your honest review helps future clients make informed choices. Leaving one is completely optional."
-                    : "Your feedback helps TaskGrid recognise clear, respectful clients. Leaving one is completely optional."}
+                    ? 'Your honest review helps future clients make informed choices. Leaving one is completely optional.'
+                    : 'Your feedback helps TaskGrid recognise clear, respectful clients. Leaving one is completely optional.'}
                 </AppText>
 
                 <View
                   style={styles.starChooser}
                   accessibilityRole="radiogroup"
-                  accessibilityLabel={`${isOwner ? "Worker" : "Client"} star rating`}
+                  accessibilityLabel={`${isOwner ? 'Worker' : 'Client'} star rating`}
                 >
                   {[1, 2, 3, 4, 5].map((star) => (
                     <Pressable
                       key={star}
                       accessibilityRole="radio"
-                      accessibilityLabel={`${star} ${star === 1 ? "star" : "stars"}`}
+                      accessibilityLabel={`${star} ${star === 1 ? 'star' : 'stars'}`}
                       accessibilityState={{ checked: reviewRating === star }}
                       onPress={() => setReviewRating(star)}
                       hitSlop={4}
@@ -1392,7 +1317,7 @@ export default function TaskDetailScreen() {
                       ]}
                     >
                       <Ionicons
-                        name={star <= reviewRating ? "star" : "star-outline"}
+                        name={star <= reviewRating ? 'star' : 'star-outline'}
                         size={38}
                         color={colors.warning}
                       />
@@ -1404,44 +1329,35 @@ export default function TaskDetailScreen() {
                   color={reviewRating > 0 ? colors.warning : colors.textMuted}
                   style={styles.ratingLabel}
                 >
-                  {reviewRating > 0
-                    ? ratingLabels[reviewRating]
-                    : "Tap a star to rate the work"}
+                  {reviewRating > 0 ? ratingLabels[reviewRating] : 'Tap a star to rate the work'}
                 </AppText>
 
                 <TextField
                   label="Write a review (optional)"
                   placeholder={
                     isOwner
-                      ? "What stood out about the work or communication?"
-                      : "How clear were the instructions and communication?"
+                      ? 'What stood out about the work or communication?'
+                      : 'How clear were the instructions and communication?'
                   }
                   value={reviewComment}
                   onChangeText={setReviewComment}
                   multiline
                   maxLength={1000}
                 />
-                <AppText
-                  variant="caption"
-                  color={colors.textMuted}
-                  style={styles.reviewCountText}
-                >
+                <AppText variant="caption" color={colors.textMuted} style={styles.reviewCountText}>
                   {reviewComment.length}/1000
                 </AppText>
                 <Button
                   label="Publish review"
                   icon="paper-plane-outline"
                   disabled={reviewRating < 1}
-                  loading={busyAction === "review"}
+                  loading={busyAction === 'review'}
                   onPress={() => void submitReview()}
                 />
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => setReviewDismissed(true)}
-                  style={({ pressed }) => [
-                    styles.notNowReview,
-                    { opacity: pressed ? 0.55 : 1 },
-                  ]}
+                  style={({ pressed }) => [styles.notNowReview, { opacity: pressed ? 0.55 : 1 }]}
                 >
                   <AppText variant="bodyMedium" color={colors.textMuted}>
                     Not now
@@ -1467,9 +1383,7 @@ export default function TaskDetailScreen() {
                 <AppText variant="eyebrow" color={colors.warning}>
                   Optional
                 </AppText>
-                <AppText variant="bodyMedium">
-                  Leave a review for {reviewSubject}
-                </AppText>
+                <AppText variant="bodyMedium">Leave a review for {reviewSubject}</AppText>
               </View>
               <Ionicons name="arrow-forward" size={20} color={colors.primary} />
             </Pressable>
@@ -1477,33 +1391,24 @@ export default function TaskDetailScreen() {
 
           {task.review && (isOwner || isAssigned) ? (
             <AnimatedEntrance delay={100}>
-              <View
-                style={[
-                  styles.publishedReview,
-                  { borderColor: colors.divider },
-                ]}
-              >
+              <View style={[styles.publishedReview, { borderColor: colors.divider }]}>
                 <View style={styles.publishedReviewHeading}>
                   <View>
                     <AppText variant="eyebrow" color={colors.primary}>
-                      {isOwner ? "Your review" : "Client review"}
+                      {isOwner ? 'Your review' : 'Client review'}
                     </AppText>
                     <AppText variant="subtitle">
-                      {task.review.moderationStatus === "REMOVED"
-                        ? "Review removed"
+                      {task.review.moderationStatus === 'REMOVED'
+                        ? 'Review removed'
                         : `${task.review.rating} out of 5`}
                     </AppText>
                   </View>
-                  {task.review.moderationStatus !== "REMOVED" ? (
+                  {task.review.moderationStatus !== 'REMOVED' ? (
                     <View style={styles.publishedStars}>
                       {[1, 2, 3, 4, 5].map((star) => (
                         <Ionicons
                           key={star}
-                          name={
-                            star <= task.review!.rating
-                              ? "star"
-                              : "star-outline"
-                          }
+                          name={star <= task.review!.rating ? 'star' : 'star-outline'}
                           size={18}
                           color={colors.warning}
                         />
@@ -1511,27 +1416,21 @@ export default function TaskDetailScreen() {
                     </View>
                   ) : null}
                 </View>
-                {task.review.moderationStatus === "REMOVED" ? (
+                {task.review.moderationStatus === 'REMOVED' ? (
                   <AppText color={colors.textMuted}>
-                    This review is no longer included in the worker’s public
-                    reputation.
+                    This review is no longer included in the worker’s public reputation.
                   </AppText>
                 ) : task.review.comment ? (
-                  <AppText
-                    color={colors.textSecondary}
-                    style={styles.publishedComment}
-                  >
+                  <AppText color={colors.textSecondary} style={styles.publishedComment}>
                     “{task.review.comment}”
                   </AppText>
                 ) : (
-                  <AppText color={colors.textMuted}>
-                    No written comment was added.
-                  </AppText>
+                  <AppText color={colors.textMuted}>No written comment was added.</AppText>
                 )}
                 {isAssigned &&
-                task.review.moderationStatus !== "FLAGGED" &&
-                task.review.moderationStatus !== "UNDER_REVIEW" &&
-                task.review.moderationStatus !== "REMOVED" ? (
+                task.review.moderationStatus !== 'FLAGGED' &&
+                task.review.moderationStatus !== 'UNDER_REVIEW' &&
+                task.review.moderationStatus !== 'REMOVED' ? (
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => setReportReviewVisible(true)}
@@ -1546,11 +1445,11 @@ export default function TaskDetailScreen() {
                   </Pressable>
                 ) : null}
                 {isAssigned &&
-                (task.review.moderationStatus === "FLAGGED" ||
-                  task.review.moderationStatus === "UNDER_REVIEW") ? (
+                (task.review.moderationStatus === 'FLAGGED' ||
+                  task.review.moderationStatus === 'UNDER_REVIEW') ? (
                   <AppText variant="caption" color={colors.warning}>
-                    This review has been sent to TaskGrid for moderation and is
-                    excluded from your public rating while it is checked.
+                    This review has been sent to TaskGrid for moderation and is excluded from your
+                    public rating while it is checked.
                   </AppText>
                 ) : null}
               </View>
@@ -1559,30 +1458,19 @@ export default function TaskDetailScreen() {
 
           {isAssigned && mySubmittedReview ? (
             <AnimatedEntrance delay={120}>
-              <View
-                style={[
-                  styles.publishedReview,
-                  { borderColor: colors.divider },
-                ]}
-              >
+              <View style={[styles.publishedReview, { borderColor: colors.divider }]}>
                 <View style={styles.publishedReviewHeading}>
                   <View>
                     <AppText variant="eyebrow" color={colors.primary}>
                       Your review of {reviewSubject}
                     </AppText>
-                    <AppText variant="subtitle">
-                      {mySubmittedReview.rating} out of 5
-                    </AppText>
+                    <AppText variant="subtitle">{mySubmittedReview.rating} out of 5</AppText>
                   </View>
                   <View style={styles.publishedStars}>
                     {[1, 2, 3, 4, 5].map((star) => (
                       <Ionicons
                         key={star}
-                        name={
-                          star <= mySubmittedReview.rating
-                            ? "star"
-                            : "star-outline"
-                        }
+                        name={star <= mySubmittedReview.rating ? 'star' : 'star-outline'}
                         size={18}
                         color={colors.warning}
                       />
@@ -1590,33 +1478,21 @@ export default function TaskDetailScreen() {
                   </View>
                 </View>
                 {mySubmittedReview.comment ? (
-                  <AppText
-                    color={colors.textSecondary}
-                    style={styles.publishedComment}
-                  >
+                  <AppText color={colors.textSecondary} style={styles.publishedComment}>
                     “{mySubmittedReview.comment}”
                   </AppText>
                 ) : (
-                  <AppText color={colors.textMuted}>
-                    No written comment was added.
-                  </AppText>
+                  <AppText color={colors.textMuted}>No written comment was added.</AppText>
                 )}
               </View>
             </AnimatedEntrance>
           ) : null}
 
-          {task.status === "COMPLETED" &&
-          task.paymentStatus === "COMPLETED" &&
-          reviewCountdown ? (
+          {task.status === 'COMPLETED' && task.paymentStatus === 'COMPLETED' && reviewCountdown ? (
             <AnimatedEntrance delay={100}>
-              <View
-                style={[
-                  styles.reviewExperience,
-                  { borderLeftColor: colors.warning },
-                ]}
-              >
+              <View style={[styles.reviewExperience, { borderLeftColor: colors.warning }]}>
                 <AppText variant="eyebrow" color={colors.warning}>
-                  {isOwner ? "Your review window" : "Client review in progress"}
+                  {isOwner ? 'Your review window' : 'Client review in progress'}
                 </AppText>
                 <AppText variant="display" style={styles.reviewCountdown}>
                   {reviewCountdown}
@@ -1624,19 +1500,14 @@ export default function TaskDetailScreen() {
                 <AppText color={colors.textSecondary} style={styles.reviewLead}>
                   {isOwner
                     ? reviewExpired
-                      ? "The review window has closed. Automatic payment release is being processed."
-                      : `${task.assignedRunnerName ?? "The worker"} has submitted completion evidence. Approve the work or open a dispute before this timer ends.`
+                      ? 'The review window has closed. Automatic payment release is being processed.'
+                      : `${task.assignedRunnerName ?? 'The worker'} has submitted completion evidence. Approve the work or open a dispute before this timer ends.`
                     : reviewExpired
-                      ? "The review window has closed. Your earnings will become available after automatic release is processed."
+                      ? 'The review window has closed. Your earnings will become available after automatic release is processed.'
                       : `${task.clientName} can now review your evidence. Your earnings remain protected and will release automatically if no dispute is opened.`}
                 </AppText>
 
-                <View
-                  style={[
-                    styles.reviewRule,
-                    { backgroundColor: colors.divider },
-                  ]}
-                />
+                <View style={[styles.reviewRule, { backgroundColor: colors.divider }]} />
                 <View style={styles.reviewDates}>
                   <View style={styles.reviewDateColumn}>
                     <AppText variant="caption" color={colors.textMuted}>
@@ -1644,16 +1515,13 @@ export default function TaskDetailScreen() {
                     </AppText>
                     <AppText variant="bodyMedium">
                       {task.runnerCompletedAt
-                        ? new Date(task.runnerCompletedAt).toLocaleString(
-                            "en-NG",
-                            {
-                              day: "numeric",
-                              month: "short",
-                              hour: "numeric",
-                              minute: "2-digit",
-                            },
-                          )
-                        : "Recently"}
+                        ? new Date(task.runnerCompletedAt).toLocaleString('en-NG', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })
+                        : 'Recently'}
                     </AppText>
                   </View>
                   <View style={styles.reviewDateColumn}>
@@ -1661,43 +1529,35 @@ export default function TaskDetailScreen() {
                       Review closes
                     </AppText>
                     <AppText variant="bodyMedium">
-                      {new Date(
-                        task.completionReviewDeadlineAt!,
-                      ).toLocaleString("en-NG", {
-                        day: "numeric",
-                        month: "short",
-                        hour: "numeric",
-                        minute: "2-digit",
+                      {new Date(task.completionReviewDeadlineAt!).toLocaleString('en-NG', {
+                        day: 'numeric',
+                        month: 'short',
+                        hour: 'numeric',
+                        minute: '2-digit',
                       })}
                     </AppText>
                   </View>
                 </View>
                 <AppText variant="caption" color={colors.textMuted}>
                   {isOwner
-                    ? "Approving releases the payment immediately. Opening a dispute freezes it for TaskGrid review."
-                    : "Released earnings appear in your wallet. A dispute freezes the payment until TaskGrid records a decision."}
+                    ? 'Approving releases the payment immediately. Opening a dispute freezes it for TaskGrid review.'
+                    : 'Released earnings appear in your wallet. A dispute freezes the payment until TaskGrid records a decision.'}
                 </AppText>
               </View>
             </AnimatedEntrance>
           ) : null}
 
           {(task.completionImages?.length ?? 0) > 0 ? (
-            <TaskImageGallery
-              title="Finished work"
-              images={task.completionImages}
-            />
+            <TaskImageGallery title="Finished work" images={task.completionImages} />
           ) : null}
 
           {isOwner && isOpen(task) ? (
             <View style={styles.section}>
-              <AppText variant="subtitle">
-                Applications ({task.bids.length})
-              </AppText>
+              <AppText variant="subtitle">Applications ({task.bids.length})</AppText>
               {task.bids.length === 0 ? (
                 <SurfaceCard>
                   <AppText color={colors.textMuted}>
-                    No applications yet. You’ll be able to compare prices and
-                    choose a worker here.
+                    No applications yet. You’ll be able to compare prices and choose a worker here.
                   </AppText>
                 </SurfaceCard>
               ) : (
@@ -1713,18 +1573,11 @@ export default function TaskDetailScreen() {
                         borderBottomColor: colors.divider,
                         opacity: pressed ? 0.72 : 1,
                         borderBottomWidth:
-                          index === task.bids.length - 1
-                            ? 0
-                            : StyleSheet.hairlineWidth,
+                          index === task.bids.length - 1 ? 0 : StyleSheet.hairlineWidth,
                       },
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.bidAvatar,
-                        { backgroundColor: colors.primarySoft },
-                      ]}
-                    >
+                    <View style={[styles.bidAvatar, { backgroundColor: colors.primarySoft }]}>
                       {bid.runnerPictureUrl ? (
                         <Image
                           source={{ uri: bid.runnerPictureUrl }}
@@ -1739,29 +1592,22 @@ export default function TaskDetailScreen() {
                     <View style={styles.bidSummary}>
                       <AppText variant="bodyMedium">{bid.runnerName}</AppText>
                       <View style={styles.inlineMeta}>
-                        <Ionicons
-                          name="star"
-                          size={14}
-                          color={colors.warning}
-                        />
+                        <Ionicons name="star" size={14} color={colors.warning} />
                         <AppText variant="caption" color={colors.textSecondary}>
                           {bid.averageRating && bid.averageRating > 0
                             ? bid.averageRating.toFixed(1)
-                            : "New"}
-                          {"  ·  "}
+                            : 'New'}
+                          {'  ·  '}
                           {bid.etaMinutes} min away
                         </AppText>
                       </View>
                     </View>
                     <View style={styles.bidPrice}>
-                      <AppText variant="bodyMedium">
-                        {money(bid.proposedPrice)}
+                      <AppText variant="bodyMedium">{money(bid.proposedPrice)}</AppText>
+                      <AppText variant="caption" color={colors.textMuted}>
+                        {bid.matchesPostedPrice ? 'Posted price' : 'Adjusted'}
                       </AppText>
-                      <Ionicons
-                        name="chevron-forward"
-                        size={18}
-                        color={colors.textMuted}
-                      />
+                      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
                     </View>
                   </Pressable>
                 ))
@@ -1769,29 +1615,26 @@ export default function TaskDetailScreen() {
             </View>
           ) : null}
 
-          {user?.role === "RUNNER" && isOpen(task) ? (
+          {user?.role === 'RUNNER' && isOpen(task) ? (
             <View style={styles.section}>
               {myBid ? (
                 <SurfaceCard style={styles.notice}>
-                  <Ionicons
-                    name="checkmark-circle-outline"
-                    size={27}
-                    color={colors.success}
-                  />
+                  <Ionicons name="checkmark-circle-outline" size={27} color={colors.success} />
                   <AppText variant="subtitle">Application sent</AppText>
                   <AppText color={colors.textSecondary}>
-                    Your proposed price: {money(myBid.proposedPrice)}. Status:{" "}
-                    {label(myBid.status)}.
+                    {myBid.matchesPostedPrice ? 'Posted price accepted' : 'Adjusted price'}:{' '}
+                    {money(myBid.proposedPrice)}. Status: {label(myBid.status)}.
                   </AppText>
+                  {myBid.priceAdjustmentReason ? (
+                    <AppText variant="caption" color={colors.textMuted}>
+                      Adjustment reason: {myBid.priceAdjustmentReason}
+                    </AppText>
+                  ) : null}
                 </SurfaceCard>
               ) : readinessError ? (
                 <SurfaceCard style={styles.notice}>
-                  <AppText variant="subtitle">
-                    Account status unavailable
-                  </AppText>
-                  <AppText color={colors.textSecondary}>
-                    {readinessError}
-                  </AppText>
+                  <AppText variant="subtitle">Account status unavailable</AppText>
+                  <AppText color={colors.textSecondary}>{readinessError}</AppText>
                   <Button
                     label="Try again"
                     variant="secondary"
@@ -1801,35 +1644,34 @@ export default function TaskDetailScreen() {
               ) : kycVerified === null || contactReady === null ? (
                 <SurfaceCard style={styles.notice}>
                   <AppText color={colors.textSecondary}>
-                    Checking your account readiness. Refresh if this takes too
-                    long.
+                    Checking your account readiness. Refresh if this takes too long.
                   </AppText>
                 </SurfaceCard>
               ) : !kycVerified ? (
                 <SurfaceCard style={styles.notice}>
-                  <AppText variant="subtitle">
-                    Verify your identity first
-                  </AppText>
+                  <AppText variant="subtitle">Verify your identity first</AppText>
                   <Button
                     label="Go to verification"
                     variant="secondary"
-                    onPress={() => router.push("/(tabs)/profile/kyc")}
+                    onPress={() => router.push('/(tabs)/profile/kyc')}
                   />
                 </SurfaceCard>
               ) : !contactReady ? (
                 <SurfaceCard style={styles.notice}>
-                  <AppText variant="subtitle">
-                    Add your emergency contact first
-                  </AppText>
+                  <AppText variant="subtitle">Add your emergency contact first</AppText>
                   <Button
                     label="Add contact"
                     variant="secondary"
-                    onPress={() => router.push("/emergency-contact")}
+                    onPress={() => router.push('/emergency-contact')}
                   />
                 </SurfaceCard>
               ) : (
                 <SurfaceCard style={styles.form}>
                   <AppText variant="subtitle">Apply for this task</AppText>
+                  <AppText color={colors.textSecondary}>
+                    The client posted {money(task.budget)}. You can accept it or make a reasoned
+                    adjustment within {task.maximumPriceAdjustmentPercent}%.
+                  </AppText>
                   <MoneyField
                     label="Your price"
                     value={proposedPrice}
@@ -1840,9 +1682,7 @@ export default function TaskDetailScreen() {
                           accessibilityRole="button"
                           accessibilityLabel={`Use the client's budget of ${money(task.budget)}`}
                           accessibilityState={{ selected: matchesBudget }}
-                          onPress={() =>
-                            setProposedPrice(task.budget!.toFixed(2))
-                          }
+                          onPress={() => setProposedPrice(task.budget!.toFixed(2))}
                           hitSlop={8}
                           style={({ pressed }) => [
                             styles.useBudgetAction,
@@ -1850,11 +1690,7 @@ export default function TaskDetailScreen() {
                           ]}
                         >
                           {matchesBudget ? (
-                            <Ionicons
-                              name="checkmark-circle"
-                              size={16}
-                              color={colors.primary}
-                            />
+                            <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
                           ) : null}
                           <AppText variant="caption" color={colors.primary}>
                             Same as budget
@@ -1863,10 +1699,29 @@ export default function TaskDetailScreen() {
                       ) : null
                     }
                   />
+                  {minimumApplicationPrice != null && maximumApplicationPrice != null ? (
+                    <AppText variant="caption" color={colors.textMuted}>
+                      Allowed range {money(minimumApplicationPrice)} to {money(maximumApplicationPrice)}
+                    </AppText>
+                  ) : null}
+                  {needsPriceReason ? (
+                    <View style={styles.fieldGroup}>
+                      <TextField
+                        label="Reason for price adjustment"
+                        placeholder="Explain materials, scope or another clear cost"
+                        value={priceAdjustmentReason}
+                        onChangeText={setPriceAdjustmentReason}
+                        multiline
+                        maxLength={300}
+                      />
+                      <AppText variant="caption" color={colors.textMuted}>
+                        Give a clear reason using at least 10 characters.
+                      </AppText>
+                    </View>
+                  ) : null}
                   <AppText variant="caption" color={colors.textMuted}>
-                    TaskGrid will use your current location to calculate an
-                    approximate travel time. The client sees the estimate, not
-                    your coordinates.
+                    TaskGrid will use your current location to calculate an approximate travel time.
+                    The client sees the estimate, not your coordinates.
                   </AppText>
                   <TextField
                     label="Short message (optional)"
@@ -1880,7 +1735,7 @@ export default function TaskDetailScreen() {
                     label="Send application"
                     onPress={apply}
                     disabled={!validPrice}
-                    loading={busyAction === "apply"}
+                    loading={busyAction === 'apply'}
                   />
                 </SurfaceCard>
               )}
@@ -1888,33 +1743,30 @@ export default function TaskDetailScreen() {
           ) : null}
 
           {isOwner &&
-          task.status === "ACCEPTED" &&
-          (!task.paymentStatus || task.paymentStatus === "INITIALIZED") ? (
+          task.status === 'ACCEPTED' &&
+          (!task.paymentStatus || task.paymentStatus === 'INITIALIZED') ? (
             <SurfaceCard style={styles.form}>
               <AppText variant="subtitle">Pay securely to start</AppText>
               <AppText color={colors.textSecondary}>
-                You’ll pay {money(task.acceptedPrice)} through Paystack. The
-                worker can start only after payment is confirmed.
+                You’ll pay {money(task.acceptedPrice)} through Paystack. The worker can start only
+                after payment is confirmed.
               </AppText>
               <Button
-                label={
-                  task.paymentStatus ? "Continue checkout" : "Pay for task"
-                }
+                label={task.paymentStatus ? 'Continue checkout' : 'Pay for task'}
                 onPress={checkout}
-                loading={busyAction === "checkout"}
+                loading={busyAction === 'checkout'}
               />
             </SurfaceCard>
           ) : null}
           {isAssigned &&
-          task.paymentStatus === "HELD" &&
-          task.status === "ARRIVED" &&
+          task.paymentStatus === 'HELD' &&
+          task.status === 'ARRIVED' &&
           task.arrivedAt ? (
             <SurfaceCard style={styles.form}>
               <AppText variant="subtitle">Submit completed work</AppText>
               <AppText color={colors.textSecondary}>
-                Add at least one clear after-photo. The client and TaskGrid
-                support can compare it with the original task photos if there is
-                a problem.
+                Add at least one clear after-photo. The client and TaskGrid support can compare it
+                with the original task photos if there is a problem.
               </AppText>
               <TaskPhotoPicker
                 label="Completion photos (required)"
@@ -1927,44 +1779,33 @@ export default function TaskDetailScreen() {
               <Button
                 label="Upload and mark complete"
                 onPress={complete}
-                loading={busyAction === "complete"}
+                loading={busyAction === 'complete'}
                 disabled={
-                  (task.completionImages?.length ?? 0) === 0 &&
-                  completionPhotos.length === 0
+                  (task.completionImages?.length ?? 0) === 0 && completionPhotos.length === 0
                 }
               />
             </SurfaceCard>
           ) : null}
-          {isOwner &&
-          task.status === "COMPLETED" &&
-          task.paymentStatus === "COMPLETED" ? (
-            <View
-              style={[styles.reviewActions, { borderTopColor: colors.divider }]}
-            >
+          {isOwner && task.status === 'COMPLETED' && task.paymentStatus === 'COMPLETED' ? (
+            <View style={[styles.reviewActions, { borderTopColor: colors.divider }]}>
               <AppText variant="eyebrow" color={colors.primary}>
                 Your decision
               </AppText>
-              <AppText variant="subtitle">
-                Does the finished work match the task?
-              </AppText>
+              <AppText variant="subtitle">Does the finished work match the task?</AppText>
               <AppText color={colors.textSecondary}>
-                Confirming releases {money(task.acceptedPrice)} to{" "}
-                {task.assignedRunnerName ?? "the worker"}. Only continue when
-                you are satisfied.
+                Confirming releases {money(task.acceptedPrice)} to{' '}
+                {task.assignedRunnerName ?? 'the worker'}. Only continue when you are satisfied.
               </AppText>
               <Button
                 label="Confirm completion"
                 onPress={confirm}
-                loading={busyAction === "confirm"}
+                loading={busyAction === 'confirm'}
               />
               {!reviewExpired ? (
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => router.push(`/dispute/${task.id}` as never)}
-                  style={({ pressed }) => [
-                    styles.disputeLink,
-                    { opacity: pressed ? 0.6 : 1 },
-                  ]}
+                  style={({ pressed }) => [styles.disputeLink, { opacity: pressed ? 0.6 : 1 }]}
                 >
                   <AppText variant="bodyMedium" color={colors.danger}>
                     Having an issue with this task? Open a dispute
@@ -1975,28 +1816,15 @@ export default function TaskDetailScreen() {
           ) : null}
           {(isOwner || isAssigned) &&
           !task.disputeStatus &&
-          [
-            "ACCEPTED",
-            "IN_PROGRESS",
-            "EN_ROUTE",
-            "ARRIVED",
-            "COMPLETED",
-          ].includes(task.status) &&
+          ['ACCEPTED', 'IN_PROGRESS', 'EN_ROUTE', 'ARRIVED', 'COMPLETED'].includes(task.status) &&
           task.paymentStatus &&
-          ["HELD", "IN_PROGRESS", "COMPLETED"].includes(task.paymentStatus) &&
-          !(task.status === "COMPLETED" && reviewExpired) &&
-          !(
-            isOwner &&
-            task.status === "COMPLETED" &&
-            task.paymentStatus === "COMPLETED"
-          ) ? (
+          ['HELD', 'IN_PROGRESS', 'COMPLETED'].includes(task.paymentStatus) &&
+          !(task.status === 'COMPLETED' && reviewExpired) &&
+          !(isOwner && task.status === 'COMPLETED' && task.paymentStatus === 'COMPLETED') ? (
             <Pressable
               accessibilityRole="button"
               onPress={() => router.push(`/dispute/${task.id}` as never)}
-              style={({ pressed }) => [
-                styles.disputeLink,
-                { opacity: pressed ? 0.6 : 1 },
-              ]}
+              style={({ pressed }) => [styles.disputeLink, { opacity: pressed ? 0.6 : 1 }]}
             >
               <AppText variant="bodyMedium" color={colors.danger}>
                 Having an issue with this task? Open a dispute
@@ -2011,12 +1839,50 @@ export default function TaskDetailScreen() {
               onPress={() => router.push(`/dispute/${task.id}` as never)}
             />
           ) : null}
-          {isAssigned &&
-          task.status === "ACCEPTED" &&
-          task.paymentStatus !== "HELD" ? (
+          {task.status === 'CANCELLED' && cancellation ? (
+            <View style={[styles.cancellationSummary, { borderTopColor: colors.divider }]}>
+              <AppText variant="eyebrow" color={colors.textMuted}>
+                Cancellation summary
+              </AppText>
+              <AppText variant="subtitle">
+                {cancellation.refundPending ? 'Refund in progress' : 'Task cancelled'}
+              </AppText>
+              <AppText color={colors.textSecondary}>{cancellation.explanation}</AppText>
+              {cancellation.taskAmount > 0 ? (
+                <View style={styles.cancellationAmounts}>
+                  <View style={styles.cancellationAmountItem}>
+                    <AppText variant="caption" color={colors.textMuted}>
+                      Client refund
+                    </AppText>
+                    <AppText variant="bodyMedium">{money(cancellation.clientRefundAmount)}</AppText>
+                  </View>
+                  <View style={styles.cancellationAmountItem}>
+                    <AppText variant="caption" color={colors.textMuted}>
+                      Worker compensation
+                    </AppText>
+                    <AppText variant="bodyMedium">
+                      {money(cancellation.workerCompensationAmount)}
+                    </AppText>
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+          {canCancelTask ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void openCancellation()}
+              style={({ pressed }) => [styles.cancelTaskLink, { opacity: pressed ? 0.55 : 1 }]}
+            >
+              <AppText variant="bodyMedium" color={colors.danger}>
+                Cancel this task
+              </AppText>
+              <Ionicons name="arrow-forward" size={18} color={colors.danger} />
+            </Pressable>
+          ) : null}
+          {isAssigned && task.status === 'ACCEPTED' && task.paymentStatus !== 'HELD' ? (
             <AppText color={colors.textMuted}>
-              Waiting for the client’s payment to be confirmed before work
-              begins.
+              Waiting for the client’s payment to be confirmed before work begins.
             </AppText>
           ) : null}
           <Button
@@ -2030,31 +1896,196 @@ export default function TaskDetailScreen() {
       ) : null}
 
       <Modal
+        visible={cancellationVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !busy && setCancellationVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalKeyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.overlay}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => !busy && setCancellationVisible(false)}
+            />
+            <View style={[styles.modal, { backgroundColor: colors.surface }]}>
+              <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.cancellationSheet}
+              >
+                <View style={styles.cancellationHeading}>
+                  <View>
+                    <AppText variant="eyebrow" color={colors.danger}>
+                      Review before cancelling
+                    </AppText>
+                    <AppText variant="title">Cancel this task?</AppText>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Close cancellation"
+                    onPress={() => setCancellationVisible(false)}
+                    style={[styles.cancellationClose, { backgroundColor: colors.background }]}
+                  >
+                    <Ionicons name="close" size={21} color={colors.text} />
+                  </Pressable>
+                </View>
+
+                <AppText color={colors.textSecondary}>{cancellation?.explanation}</AppText>
+
+                {cancellation && cancellation.taskAmount > 0 ? (
+                  <View style={[styles.quoteBreakdown, { borderColor: colors.divider }]}>
+                    <View style={styles.quoteLine}>
+                      <AppText color={colors.textSecondary}>Refund to you</AppText>
+                      <AppText variant="subtitle">{money(cancellation.clientRefundAmount)}</AppText>
+                    </View>
+                    <View style={styles.quoteLine}>
+                      <AppText color={colors.textSecondary}>Worker compensation</AppText>
+                      <AppText variant="bodyMedium">
+                        {money(cancellation.workerCompensationAmount)}
+                      </AppText>
+                    </View>
+                    {cancellation.stage === 'EN_ROUTE' ? (
+                      <AppText variant="caption" color={colors.textMuted}>
+                        Compensation is {cancellation.workerCompensationPercent.toFixed(0)}% because
+                        the worker has already started travelling.
+                      </AppText>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                <View style={styles.reasonList}>
+                  <AppText variant="bodyMedium">Why are you cancelling?</AppText>
+                  {cancellationReasons.map((reason) => {
+                    const selected = cancellationReason === reason.value;
+                    return (
+                      <Pressable
+                        key={reason.value}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected }}
+                        onPress={() => setCancellationReason(reason.value)}
+                        style={({ pressed }) => [
+                          styles.reasonOption,
+                          { borderBottomColor: colors.divider, opacity: pressed ? 0.65 : 1 },
+                        ]}
+                      >
+                        <AppText color={selected ? colors.primary : colors.text}>
+                          {reason.label}
+                        </AppText>
+                        <Ionicons
+                          name={selected ? 'radio-button-on' : 'radio-button-off'}
+                          size={22}
+                          color={selected ? colors.primary : colors.textMuted}
+                        />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {cancellationReason === 'OTHER' ? (
+                  <TextField
+                    label="Tell us what happened"
+                    placeholder="Add a short explanation"
+                    value={cancellationDetails}
+                    onChangeText={setCancellationDetails}
+                    multiline
+                    maxLength={1000}
+                  />
+                ) : null}
+
+                <Button
+                  label="Confirm cancellation"
+                  variant="danger"
+                  loading={busyAction === 'cancel-task'}
+                  onPress={() => void confirmCancellation()}
+                />
+                <Button
+                  label="Keep task"
+                  variant="ghost"
+                  disabled={busy}
+                  onPress={() => setCancellationVisible(false)}
+                />
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={Boolean(lifecycleReminder)}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissLifecycleReminder}
+      >
+        <View style={styles.journeyPromptOverlay}>
+          <View style={[styles.lifecycleReminderPrompt, { backgroundColor: colors.surface }]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close reminder"
+              onPress={dismissLifecycleReminder}
+              style={[styles.journeyPromptClose, { backgroundColor: colors.background }]}
+            >
+              <Ionicons name="close" size={21} color={colors.text} />
+            </Pressable>
+            <View style={[styles.lifecycleReminderMark, { backgroundColor: colors.primarySoft }]}>
+              <Ionicons
+                name={
+                  lifecycleReminder?.type === 'JOURNEY_DELAY' ? 'navigate-outline' : 'time-outline'
+                }
+                size={30}
+                color={colors.primary}
+              />
+            </View>
+            <AppText variant="eyebrow" color={colors.primary}>
+              Task check-in
+            </AppText>
+            <AppText variant="title" style={styles.journeyPromptTitle}>
+              {lifecycleReminder?.type === 'JOURNEY_DELAY'
+                ? 'The journey is taking longer'
+                : 'Is the task still underway?'}
+            </AppText>
+            <AppText color={colors.textSecondary} style={styles.journeyPromptDescription}>
+              {lifecycleReminder?.message}
+            </AppText>
+            <Button
+              label={lifecycleReminder?.positiveActionLabel ?? 'Still working'}
+              icon="checkmark-circle-outline"
+              loading={reminderBusy}
+              onPress={() =>
+                void respondToLifecycleReminder(
+                  lifecycleReminder?.type === 'JOURNEY_DELAY' ? 'KEEP_WAITING' : 'STILL_WORKING',
+                )
+              }
+            />
+            <Button
+              label="Open a dispute"
+              variant="danger"
+              icon="alert-circle-outline"
+              disabled={reminderBusy}
+              onPress={() => void respondToLifecycleReminder('OPEN_DISPUTE')}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={Boolean(selectedBid)}
         transparent
         animationType="slide"
         onRequestClose={() => setSelectedBid(null)}
       >
         <View style={styles.overlay}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setSelectedBid(null)}
-          />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedBid(null)} />
           <View style={[styles.modal, { backgroundColor: colors.surface }]}>
-            <View
-              style={[styles.sheetHandle, { backgroundColor: colors.border }]}
-            />
+            <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.applicantSheet}
             >
               <View style={styles.applicantHero}>
-                <View
-                  style={[
-                    styles.applicantAvatar,
-                    { backgroundColor: colors.primarySoft },
-                  ]}
-                >
+                <View style={[styles.applicantAvatar, { backgroundColor: colors.primarySoft }]}>
                   {selectedBid?.runnerPictureUrl ? (
                     <Image
                       source={{ uri: selectedBid.runnerPictureUrl }}
@@ -2070,90 +2101,73 @@ export default function TaskDetailScreen() {
                   {selectedBid?.runnerName}
                 </AppText>
                 <AppText color={colors.textSecondary}>
-                  {selectedBid?.primarySkill ?? "TaskGrid worker"}
+                  {selectedBid?.primarySkill ?? 'TaskGrid worker'}
                 </AppText>
                 {selectedBid?.identityVerified ? (
                   <View style={styles.identitySignal}>
-                    <Ionicons
-                      name="shield-checkmark"
-                      size={17}
-                      color={colors.success}
-                    />
+                    <Ionicons name="shield-checkmark" size={17} color={colors.success} />
                     <AppText variant="bodyMedium" color={colors.success}>
                       Identity verified
                     </AppText>
                   </View>
                 ) : null}
-                <AppText
-                  variant="caption"
-                  color={colors.textMuted}
-                  style={styles.identityNote}
-                >
-                  Identity verification checks submitted details. It does not
-                  guarantee safety or job quality.
+                <AppText variant="caption" color={colors.textMuted} style={styles.identityNote}>
+                  Identity verification checks submitted details. It does not guarantee safety or
+                  job quality.
                 </AppText>
               </View>
 
-              <View
-                style={[styles.trustStrip, { borderColor: colors.divider }]}
-              >
+              <View style={[styles.trustStrip, { borderColor: colors.divider }]}>
                 <View style={styles.trustMetric}>
                   <AppText variant="subtitle">
                     {selectedBid?.averageRating && selectedBid.averageRating > 0
                       ? selectedBid.averageRating.toFixed(1)
-                      : "New"}
+                      : 'New'}
                   </AppText>
                   <AppText variant="caption" color={colors.textMuted}>
                     Rating
                   </AppText>
                 </View>
                 <View style={styles.trustMetric}>
-                  <AppText variant="subtitle">
-                    {selectedBid?.reviewCount ?? 0}
-                  </AppText>
+                  <AppText variant="subtitle">{selectedBid?.reviewCount ?? 0}</AppText>
                   <AppText variant="caption" color={colors.textMuted}>
-                    {(selectedBid?.reviewCount ?? 0) === 1
-                      ? "Review"
-                      : "Reviews"}
+                    {(selectedBid?.reviewCount ?? 0) === 1 ? 'Review' : 'Reviews'}
                   </AppText>
                 </View>
                 <View style={styles.trustMetric}>
-                  <AppText variant="subtitle">
-                    {selectedBid?.totalJobs ?? 0}
-                  </AppText>
+                  <AppText variant="subtitle">{selectedBid?.totalJobs ?? 0}</AppText>
                   <AppText variant="caption" color={colors.textMuted}>
                     Completed jobs
                   </AppText>
                 </View>
                 <View style={styles.trustMetric}>
-                  <AppText variant="subtitle">
-                    {selectedBid?.etaMinutes ?? 0}m
-                  </AppText>
+                  <AppText variant="subtitle">{selectedBid?.etaMinutes ?? 0}m</AppText>
                   <AppText variant="caption" color={colors.textMuted}>
                     Arrival
                   </AppText>
                 </View>
               </View>
 
-              <View
-                style={[
-                  styles.proposalBand,
-                  { backgroundColor: colors.primarySoft },
-                ]}
-              >
+              <View style={[styles.proposalBand, { backgroundColor: colors.primarySoft }]}>
                 <View>
                   <AppText variant="caption" color={colors.textMuted}>
                     Proposed price
                   </AppText>
-                  <AppText variant="title">
-                    {money(selectedBid?.proposedPrice ?? null)}
-                  </AppText>
+                  <AppText variant="title">{money(selectedBid?.proposedPrice ?? null)}</AppText>
                 </View>
-                <Ionicons
-                  name="receipt-outline"
-                  size={28}
-                  color={colors.primary}
-                />
+                <Ionicons name="receipt-outline" size={28} color={colors.primary} />
+              </View>
+
+              <View style={styles.editorialSection}>
+                <AppText variant="eyebrow" color={colors.primary}>
+                  Price basis
+                </AppText>
+                <AppText color={colors.textSecondary}>
+                  {selectedBid?.matchesPostedPrice
+                    ? 'This worker accepted your posted price.'
+                    : selectedBid?.priceAdjustmentReason ||
+                      'This price was adjusted within TaskGrid’s permitted range.'}
+                </AppText>
               </View>
 
               {selectedBid?.message ? (
@@ -2161,9 +2175,7 @@ export default function TaskDetailScreen() {
                   <AppText variant="eyebrow" color={colors.primary}>
                     Message
                   </AppText>
-                  <AppText color={colors.textSecondary}>
-                    “{selectedBid.message}”
-                  </AppText>
+                  <AppText color={colors.textSecondary}>“{selectedBid.message}”</AppText>
                 </View>
               ) : null}
 
@@ -2174,9 +2186,9 @@ export default function TaskDetailScreen() {
                 <AppText color={colors.textSecondary}>
                   {selectedBid?.etaMinutes != null
                     ? `About ${selectedBid.etaMinutes} minutes from the task when this application was sent. `
-                    : "A travel estimate is unavailable for this application. "}
-                  This is an approximate TaskGrid calculation, not a guaranteed
-                  arrival time. The worker's coordinates are not shared here.
+                    : 'A travel estimate is unavailable for this application. '}
+                  This is an approximate TaskGrid calculation, not a guaranteed arrival time. The
+                  worker's coordinates are not shared here.
                 </AppText>
               </View>
 
@@ -2189,10 +2201,7 @@ export default function TaskDetailScreen() {
                     {selectedBid?.skills.map((skill) => (
                       <View
                         key={skill}
-                        style={[
-                          styles.skillChip,
-                          { backgroundColor: colors.surfaceSecondary },
-                        ]}
+                        style={[styles.skillChip, { backgroundColor: colors.surfaceSecondary }]}
                       >
                         <AppText variant="caption">{skill}</AppText>
                       </View>
@@ -2209,7 +2218,7 @@ export default function TaskDetailScreen() {
                   {(selectedBid?.reviewCount ?? 0) > 3 ? (
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel={`See all reviews for ${selectedBid?.runnerName ?? "this worker"}`}
+                      accessibilityLabel={`See all reviews for ${selectedBid?.runnerName ?? 'this worker'}`}
                       hitSlop={10}
                       onPress={() => {
                         if (!selectedBid) return;
@@ -2217,7 +2226,7 @@ export default function TaskDetailScreen() {
                         const workerName = selectedBid.runnerName;
                         setSelectedBid(null);
                         router.push({
-                          pathname: "/worker/[id]/reviews",
+                          pathname: '/worker/[id]/reviews',
                           params: { id: workerId, name: workerName },
                         } as never);
                       }}
@@ -2233,59 +2242,46 @@ export default function TaskDetailScreen() {
                     No reviews yet. This may be their first TaskGrid job.
                   </AppText>
                 ) : (
-                  selectedBid?.recentReviews
-                    .slice(0, 3)
-                    .map((review, index) => (
-                      <View
-                        key={`${review.createdAt}-${index}`}
-                        style={[
-                          styles.reviewLine,
-                          { borderBottomColor: colors.divider },
-                        ]}
-                      >
-                        <View style={styles.reviewHeading}>
-                          <AppText variant="bodyMedium">
-                            {review.reviewerFirstName ?? "Client"}
-                          </AppText>
-                          <AppText variant="caption" color={colors.warning}>
-                            {"★".repeat(review.rating)}
-                          </AppText>
-                        </View>
-                        {review.comment ? (
-                          <AppText color={colors.textSecondary}>
-                            {review.comment}
-                          </AppText>
-                        ) : null}
+                  selectedBid?.recentReviews.slice(0, 3).map((review, index) => (
+                    <View
+                      key={`${review.createdAt}-${index}`}
+                      style={[styles.reviewLine, { borderBottomColor: colors.divider }]}
+                    >
+                      <View style={styles.reviewHeading}>
+                        <AppText variant="bodyMedium">
+                          {review.reviewerFirstName ?? 'Client'}
+                        </AppText>
+                        <AppText variant="caption" color={colors.warning}>
+                          {'★'.repeat(review.rating)}
+                        </AppText>
                       </View>
-                    ))
+                      {review.comment ? (
+                        <AppText color={colors.textSecondary}>{review.comment}</AppText>
+                      ) : null}
+                    </View>
+                  ))
                 )}
               </View>
 
-              {selectedBid?.status === "PENDING" ? (
+              {selectedBid?.status === 'PENDING' ? (
                 <Button
-                  label={`Choose ${selectedBid.runnerName.split(" ")[0]}`}
+                  label={`Choose ${selectedBid.runnerName.split(' ')[0]}`}
                   onPress={accept}
-                  loading={busyAction === "accept"}
+                  loading={busyAction === 'accept'}
                 />
               ) : (
                 <AppText color={colors.textMuted}>
-                  This application is {label(selectedBid?.status ?? "")}.
+                  This application is {label(selectedBid?.status ?? '')}.
                 </AppText>
               )}
-              <Button
-                label="Close"
-                variant="ghost"
-                onPress={() => setSelectedBid(null)}
-              />
+              <Button label="Close" variant="ghost" onPress={() => setSelectedBid(null)} />
             </ScrollView>
           </View>
         </View>
       </Modal>
 
       <Modal
-        visible={Boolean(
-          reviewPromptVisible && isOwner && canReview && !mySubmittedReview,
-        )}
+        visible={Boolean(reviewPromptVisible && isOwner && canReview && !mySubmittedReview)}
         transparent
         animationType="fade"
         statusBarTranslucent
@@ -2295,7 +2291,7 @@ export default function TaskDetailScreen() {
         }}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalKeyboard}
         >
           <View style={styles.journeyPromptOverlay}>
@@ -2307,9 +2303,7 @@ export default function TaskDetailScreen() {
                 setReviewDismissed(true);
               }}
             />
-            <View
-              style={[styles.reviewPrompt, { backgroundColor: colors.surface }]}
-            >
+            <View style={[styles.reviewPrompt, { backgroundColor: colors.surface }]}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Close review prompt"
@@ -2334,12 +2328,7 @@ export default function TaskDetailScreen() {
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.reviewPromptContent}
               >
-                <View
-                  style={[
-                    styles.reviewPromptSeal,
-                    { backgroundColor: colors.warningSoft },
-                  ]}
-                >
+                <View style={[styles.reviewPromptSeal, { backgroundColor: colors.warningSoft }]}>
                   <Ionicons name="star" size={34} color={colors.warning} />
                 </View>
                 <AppText variant="eyebrow" color={colors.success}>
@@ -2348,12 +2337,9 @@ export default function TaskDetailScreen() {
                 <AppText variant="title" style={styles.reviewPromptTitle}>
                   How was {reviewSubject}'s work?
                 </AppText>
-                <AppText
-                  color={colors.textSecondary}
-                  style={styles.reviewPromptDescription}
-                >
-                  Your feedback helps other clients choose with confidence. A
-                  written comment is optional.
+                <AppText color={colors.textSecondary} style={styles.reviewPromptDescription}>
+                  Your feedback helps other clients choose with confidence. A written comment is
+                  optional.
                 </AppText>
 
                 <View
@@ -2365,7 +2351,7 @@ export default function TaskDetailScreen() {
                     <Pressable
                       key={star}
                       accessibilityRole="radio"
-                      accessibilityLabel={`${star} ${star === 1 ? "star" : "stars"}`}
+                      accessibilityLabel={`${star} ${star === 1 ? 'star' : 'stars'}`}
                       accessibilityState={{ checked: reviewRating === star }}
                       onPress={() => setReviewRating(star)}
                       hitSlop={3}
@@ -2375,21 +2361,15 @@ export default function TaskDetailScreen() {
                       ]}
                     >
                       <Ionicons
-                        name={star <= reviewRating ? "star" : "star-outline"}
+                        name={star <= reviewRating ? 'star' : 'star-outline'}
                         size={38}
                         color={colors.warning}
                       />
                     </Pressable>
                   ))}
                 </View>
-                <AppText
-                  variant="bodyMedium"
-                  color={colors.warning}
-                  style={styles.ratingLabel}
-                >
-                  {reviewRating > 0
-                    ? ratingLabels[reviewRating]
-                    : "Tap a star to rate the work"}
+                <AppText variant="bodyMedium" color={colors.warning} style={styles.ratingLabel}>
+                  {reviewRating > 0 ? ratingLabels[reviewRating] : 'Tap a star to rate the work'}
                 </AppText>
 
                 <TextField
@@ -2401,18 +2381,14 @@ export default function TaskDetailScreen() {
                   multiline
                   maxLength={1000}
                 />
-                <AppText
-                  variant="caption"
-                  color={colors.textMuted}
-                  style={styles.reviewCountText}
-                >
+                <AppText variant="caption" color={colors.textMuted} style={styles.reviewCountText}>
                   {reviewComment.length}/1000
                 </AppText>
                 <Button
                   label="Publish review"
                   icon="paper-plane-outline"
                   disabled={reviewRating < 1}
-                  loading={busyAction === "review"}
+                  loading={busyAction === 'review'}
                   onPress={() => void submitReview()}
                 />
                 <Pressable
@@ -2421,10 +2397,7 @@ export default function TaskDetailScreen() {
                     setReviewPromptVisible(false);
                     setReviewDismissed(true);
                   }}
-                  style={({ pressed }) => [
-                    styles.notYetAction,
-                    { opacity: pressed ? 0.55 : 1 },
-                  ]}
+                  style={({ pressed }) => [styles.notYetAction, { opacity: pressed ? 0.55 : 1 }]}
                 >
                   <AppText variant="bodyMedium" color={colors.textMuted}>
                     Not now
@@ -2443,7 +2416,7 @@ export default function TaskDetailScreen() {
         onRequestClose={() => setReportReviewVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalKeyboard}
         >
           <View style={styles.overlay}>
@@ -2452,20 +2425,16 @@ export default function TaskDetailScreen() {
               onPress={() => setReportReviewVisible(false)}
             />
             <View style={[styles.modal, { backgroundColor: colors.surface }]}>
-              <View
-                style={[styles.sheetHandle, { backgroundColor: colors.border }]}
-              />
+              <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
               <View style={styles.reportSheet}>
                 <AppText variant="eyebrow" color={colors.danger}>
                   Review moderation
                 </AppText>
-                <AppText variant="title">
-                  Tell us what needs to be checked
-                </AppText>
+                <AppText variant="title">Tell us what needs to be checked</AppText>
                 <AppText color={colors.textSecondary}>
-                  Report personal abuse, harassment, irrelevant claims or other
-                  inappropriate content. The review will be excluded from your
-                  public rating while TaskGrid checks it.
+                  Report personal abuse, harassment, irrelevant claims or other inappropriate
+                  content. The review will be excluded from your public rating while TaskGrid checks
+                  it.
                 </AppText>
                 <TextField
                   label="Reason"
@@ -2476,17 +2445,13 @@ export default function TaskDetailScreen() {
                   multiline
                   maxLength={500}
                 />
-                <AppText
-                  variant="caption"
-                  color={colors.textMuted}
-                  style={styles.reviewCountText}
-                >
+                <AppText variant="caption" color={colors.textMuted} style={styles.reviewCountText}>
                   {reportReason.length}/500
                 </AppText>
                 <Button
                   label="Send for moderation"
                   disabled={reportReason.trim().length < 10}
-                  loading={busyAction === "report-review"}
+                  loading={busyAction === 'report-review'}
                   onPress={() => void reportReview()}
                 />
                 <Button
@@ -2508,7 +2473,7 @@ export default function TaskDetailScreen() {
         onRequestClose={() => !busy && setManualArrivalVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalKeyboard}
         >
           <View style={styles.journeyPromptOverlay}>
@@ -2516,32 +2481,17 @@ export default function TaskDetailScreen() {
               style={StyleSheet.absoluteFill}
               onPress={() => !busy && setManualArrivalVisible(false)}
             />
-            <View
-              style={[styles.reviewPrompt, { backgroundColor: colors.surface }]}
-            >
-              <View
-                style={[
-                  styles.manualArrivalIcon,
-                  { backgroundColor: colors.warningSoft },
-                ]}
-              >
-                <Ionicons
-                  name="location-outline"
-                  size={30}
-                  color={colors.warning}
-                />
+            <View style={[styles.reviewPrompt, { backgroundColor: colors.surface }]}>
+              <View style={[styles.manualArrivalIcon, { backgroundColor: colors.warningSoft }]}>
+                <Ionicons name="location-outline" size={30} color={colors.warning} />
               </View>
               <AppText variant="eyebrow" color={colors.warning}>
                 GPS fallback
               </AppText>
               <AppText variant="title">Report your arrival manually?</AppText>
-              <AppText
-                color={colors.textSecondary}
-                style={styles.reviewPromptDescription}
-              >
-                Use this only when you are at the task location but your phone
-                cannot obtain a GPS position. The client will be told that the
-                arrival was not GPS verified.
+              <AppText color={colors.textSecondary} style={styles.reviewPromptDescription}>
+                Use this only when you are at the task location but your phone cannot obtain a GPS
+                position. The client will be told that the arrival was not GPS verified.
               </AppText>
               <TextField
                 label="What went wrong with GPS?"
@@ -2556,7 +2506,7 @@ export default function TaskDetailScreen() {
                 label="Report arrival"
                 icon="checkmark-circle-outline"
                 disabled={manualArrivalReason.trim().length < 10}
-                loading={busyAction === "manual-arrival"}
+                loading={busyAction === 'manual-arrival'}
                 onPress={() => void submitManualArrival()}
               />
               <Button
@@ -2578,7 +2528,7 @@ export default function TaskDetailScreen() {
         onRequestClose={() => !busy && setSosVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalKeyboard}
         >
           <View style={styles.journeyPromptOverlay}>
@@ -2586,25 +2536,17 @@ export default function TaskDetailScreen() {
               style={StyleSheet.absoluteFill}
               onPress={() => !busy && setSosVisible(false)}
             />
-            <View
-              style={[styles.reviewPrompt, { backgroundColor: colors.surface }]}
-            >
-              <View
-                style={[styles.sosSeal, { backgroundColor: colors.dangerSoft }]}
-              >
+            <View style={[styles.reviewPrompt, { backgroundColor: colors.surface }]}>
+              <View style={[styles.sosSeal, { backgroundColor: colors.dangerSoft }]}>
                 <Ionicons name="alert" size={34} color={colors.danger} />
               </View>
               <AppText variant="eyebrow" color={colors.danger}>
                 Emergency SOS
               </AppText>
               <AppText variant="title">Alert your trusted contact</AppText>
-              <AppText
-                color={colors.textSecondary}
-                style={styles.reviewPromptDescription}
-              >
-                TaskGrid will send your saved emergency contact this task and
-                your current location when available. This does not contact
-                police or replace local emergency services.
+              <AppText color={colors.textSecondary} style={styles.reviewPromptDescription}>
+                TaskGrid will send your saved emergency contact this task and your current location
+                when available. This does not contact police or replace local emergency services.
               </AppText>
               <TextField
                 label="Short note (optional)"
@@ -2619,7 +2561,7 @@ export default function TaskDetailScreen() {
                 label="Send SOS alert"
                 variant="danger"
                 icon="alert-circle-outline"
-                loading={busyAction === "sos"}
+                loading={busyAction === 'sos'}
                 onPress={() => void sendSos()}
               />
               <Button
@@ -2634,10 +2576,7 @@ export default function TaskDetailScreen() {
       </Modal>
 
       <Modal
-        visible={
-          journeyPromptVisible &&
-          (journeyStartRequired || journeyResumeRequired)
-        }
+        visible={journeyPromptVisible && (journeyStartRequired || journeyResumeRequired)}
         transparent
         animationType="fade"
         statusBarTranslucent
@@ -2655,9 +2594,7 @@ export default function TaskDetailScreen() {
               setJourneyPromptDismissed(true);
             }}
           />
-          <View
-            style={[styles.journeyPrompt, { backgroundColor: colors.surface }]}
-          >
+          <View style={[styles.journeyPrompt, { backgroundColor: colors.surface }]}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Close journey reminder"
@@ -2678,37 +2615,14 @@ export default function TaskDetailScreen() {
             </Pressable>
 
             <View style={styles.journeyArtwork}>
-              <View
-                style={[
-                  styles.routePoint,
-                  { backgroundColor: colors.successSoft },
-                ]}
-              >
-                <Ionicons
-                  name="shield-checkmark"
-                  size={25}
-                  color={colors.success}
-                />
+              <View style={[styles.routePoint, { backgroundColor: colors.successSoft }]}>
+                <Ionicons name="shield-checkmark" size={25} color={colors.success} />
               </View>
               <View style={styles.routePath}>
-                <View
-                  style={[
-                    styles.routeLine,
-                    { backgroundColor: colors.primary },
-                  ]}
-                />
-                <Ionicons
-                  name="chevron-forward"
-                  size={18}
-                  color={colors.primary}
-                />
+                <View style={[styles.routeLine, { backgroundColor: colors.primary }]} />
+                <Ionicons name="chevron-forward" size={18} color={colors.primary} />
               </View>
-              <View
-                style={[
-                  styles.routePoint,
-                  { backgroundColor: colors.primarySoft },
-                ]}
-              >
+              <View style={[styles.routePoint, { backgroundColor: colors.primarySoft }]}>
                 <Ionicons name="navigate" size={25} color={colors.primary} />
               </View>
             </View>
@@ -2719,24 +2633,16 @@ export default function TaskDetailScreen() {
             <AppText variant="title" style={styles.journeyPromptTitle}>
               Start your journey before you leave
             </AppText>
-            <AppText
-              color={colors.textSecondary}
-              style={styles.journeyPromptDescription}
-            >
-              Your exact location will be shared with the accepted client during
-              this journey, including while TaskGrid is in the background.
-              Android will show a permanent journey notification. Sharing stops
-              when you arrive, stop it, or the task ends.
+            <AppText color={colors.textSecondary} style={styles.journeyPromptDescription}>
+              Your exact location will be shared with the accepted client during this journey,
+              including while TaskGrid is in the background. Android will show a permanent journey
+              notification. Sharing stops when you arrive, stop it, or the task ends.
             </AppText>
             <Button
-              label={
-                journeyResumeRequired
-                  ? "Allow and resume sharing"
-                  : "Allow and start journey"
-              }
+              label={journeyResumeRequired ? 'Allow and resume sharing' : 'Allow and start journey'}
               icon="navigate-outline"
-              onPress={() => void journeyAction("start")}
-              loading={busyAction === "journey-start"}
+              onPress={() => void journeyAction('start')}
+              loading={busyAction === 'journey-start'}
             />
             <Pressable
               accessibilityRole="button"
@@ -2744,10 +2650,7 @@ export default function TaskDetailScreen() {
                 setJourneyPromptVisible(false);
                 setJourneyPromptDismissed(true);
               }}
-              style={({ pressed }) => [
-                styles.notYetAction,
-                { opacity: pressed ? 0.55 : 1 },
-              ]}
+              style={({ pressed }) => [styles.notYetAction, { opacity: pressed ? 0.55 : 1 }]}
             >
               <AppText variant="bodyMedium" color={colors.textMuted}>
                 Not leaving yet
@@ -2760,20 +2663,14 @@ export default function TaskDetailScreen() {
   );
 }
 
-function TaskImageGallery({
-  title,
-  images,
-}: {
-  title: string;
-  images: TaskImage[];
-}) {
+function TaskImageGallery({ title, images }: { title: string; images: TaskImage[] }) {
   const { colors } = useAppTheme();
   return (
     <View style={styles.gallerySection}>
       <View style={styles.galleryHeading}>
         <AppText variant="subtitle">{title}</AppText>
         <AppText variant="caption" color={colors.textMuted}>
-          {images.length} {images.length === 1 ? "photo" : "photos"}
+          {images.length} {images.length === 1 ? 'photo' : 'photos'}
         </AppText>
       </View>
       <ScrollView
@@ -2782,11 +2679,7 @@ function TaskImageGallery({
         contentContainerStyle={styles.gallery}
       >
         {images.map((image) => (
-          <Image
-            key={image.id}
-            source={{ uri: image.url }}
-            style={styles.taskImage}
-          />
+          <Image key={image.id} source={{ uri: image.url }} style={styles.taskImage} />
         ))}
       </ScrollView>
     </View>
@@ -2799,12 +2692,12 @@ const styles = StyleSheet.create({
     minHeight: 224,
     gap: spacing.sm,
     borderRadius: radius.xl,
-    overflow: "hidden",
+    overflow: 'hidden',
     padding: spacing.xl,
     paddingTop: spacing.xxl,
   },
   heroOrb: {
-    position: "absolute",
+    position: 'absolute',
     width: 190,
     height: 190,
     borderRadius: 95,
@@ -2812,33 +2705,33 @@ const styles = StyleSheet.create({
     top: -90,
     opacity: 0.12,
   },
-  heroTitle: { maxWidth: "88%" },
+  heroTitle: { maxWidth: '88%' },
   heroFooter: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
     gap: spacing.lg,
-    marginTop: "auto",
+    marginTop: 'auto',
   },
   journeyNext: {
-    position: "relative",
-    overflow: "hidden",
+    position: 'relative',
+    overflow: 'hidden',
     gap: spacing.md,
     borderWidth: 1,
     borderRadius: radius.xl,
     padding: spacing.xl,
   },
   journeyNumber: {
-    position: "absolute",
+    position: 'absolute',
     top: spacing.lg,
     right: spacing.lg,
     width: 36,
     height: 36,
     borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  journeyNextTitle: { maxWidth: "82%" },
+  journeyNextTitle: { maxWidth: '82%' },
   journeyNextDescription: {
     maxWidth: 340,
     lineHeight: 22,
@@ -2860,16 +2753,16 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   overviewHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   description: { fontSize: 16, lineHeight: 25 },
   card: { gap: spacing.lg },
   priceRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: spacing.md,
   },
   statusBadge: {
@@ -2878,9 +2771,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   paymentCard: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: spacing.md,
-    alignItems: "flex-start",
+    alignItems: 'flex-start',
   },
   paymentCopy: { flex: 1, gap: spacing.xs },
   frozenPayment: {
@@ -2894,70 +2787,70 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   releasedPayment: {
-    position: "relative",
-    overflow: "hidden",
+    position: 'relative',
+    overflow: 'hidden',
     minHeight: 310,
     borderRadius: radius.xl,
     padding: spacing.xl,
   },
   releasedRingLarge: {
-    position: "absolute",
+    position: 'absolute',
     width: 210,
     height: 210,
     borderWidth: 34,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: 105,
     right: -95,
     top: -72,
   },
   releasedRingSmall: {
-    position: "absolute",
+    position: 'absolute',
     width: 82,
     height: 82,
     borderWidth: 18,
-    borderColor: "rgba(255,255,255,0.07)",
+    borderColor: 'rgba(255,255,255,0.07)',
     borderRadius: 41,
     left: -32,
     bottom: 48,
   },
   releasedHeader: {
     minHeight: 48,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
   },
   releasedCheck: {
     width: 46,
     height: 46,
     borderRadius: 23,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFFFFF",
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
   releasedAmount: { fontSize: 36, lineHeight: 44, marginTop: spacing.sm },
   releasedTitle: { marginTop: spacing.xs },
   releasedDescription: { maxWidth: 330, lineHeight: 22, marginTop: spacing.sm },
   releasedDestination: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.md,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderColor: 'rgba(255,255,255,0.22)',
     borderRadius: radius.lg,
     padding: spacing.lg,
-    marginTop: "auto",
-    backgroundColor: "rgba(255,255,255,0.12)",
+    marginTop: 'auto',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   releasedDestinationCopy: { flex: 1, gap: 3 },
   securedPayment: {
-    position: "relative",
-    overflow: "hidden",
+    position: 'relative',
+    overflow: 'hidden',
     borderWidth: 1,
     borderRadius: radius.xl,
     padding: spacing.xl,
   },
   securedGlow: {
-    position: "absolute",
+    position: 'absolute',
     width: 150,
     height: 150,
     borderRadius: 75,
@@ -2967,17 +2860,17 @@ const styles = StyleSheet.create({
   },
   securedHeader: {
     minHeight: 46,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     gap: spacing.md,
   },
   securedSeal: {
     width: 46,
     height: 46,
     borderRadius: 23,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   securedAmount: { fontSize: 34, lineHeight: 42, marginTop: spacing.sm },
   securedDescription: { maxWidth: 330, lineHeight: 21, marginTop: spacing.xs },
@@ -2987,8 +2880,8 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
     marginTop: spacing.xl,
   },
-  journeyStep: { minHeight: 58, flexDirection: "row", gap: spacing.md },
-  journeyMarker: { width: 16, alignItems: "center" },
+  journeyStep: { minHeight: 58, flexDirection: 'row', gap: spacing.md },
+  journeyMarker: { width: 16, alignItems: 'center' },
   journeyDot: { width: 11, height: 11, borderRadius: 6 },
   journeyDotPending: { borderWidth: 2 },
   journeyLine: {
@@ -3000,15 +2893,15 @@ const styles = StyleSheet.create({
   },
   journeyCopy: { flex: 1, gap: 2, paddingBottom: spacing.md },
   participantTools: {
-    flexDirection: "row",
-    alignItems: "stretch",
+    flexDirection: 'row',
+    alignItems: 'stretch',
     gap: spacing.md,
   },
   conversationAction: {
     flex: 1,
     minHeight: 76,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,
@@ -3019,8 +2912,8 @@ const styles = StyleSheet.create({
     width: 76,
     minHeight: 76,
     borderRadius: 38,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 2,
   },
   privacyCopy: { lineHeight: 19 },
@@ -3031,44 +2924,44 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   reviewInvitation: {
-    position: "relative",
-    overflow: "hidden",
+    position: 'relative',
+    overflow: 'hidden',
     gap: spacing.md,
     borderWidth: 1,
     borderRadius: radius.xl,
     padding: spacing.xl,
   },
   reviewWatermark: {
-    position: "absolute",
+    position: 'absolute',
     right: -34,
     top: -34,
     opacity: 0.08,
-    transform: [{ rotate: "14deg" }],
+    transform: [{ rotate: '14deg' }],
   },
-  reviewInvitationTitle: { maxWidth: "86%", lineHeight: 31 },
+  reviewInvitationTitle: { maxWidth: '86%', lineHeight: 31 },
   reviewInvitationLead: {
     maxWidth: 340,
     lineHeight: 22,
     marginBottom: spacing.sm,
   },
   starChooser: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: spacing.sm,
   },
   starChoice: { paddingVertical: spacing.xs },
-  ratingLabel: { textAlign: "center", minHeight: 22, marginBottom: spacing.sm },
-  reviewCountText: { alignSelf: "flex-end", marginTop: -spacing.sm },
+  ratingLabel: { textAlign: 'center', minHeight: 22, marginBottom: spacing.sm },
+  reviewCountText: { alignSelf: 'flex-end', marginTop: -spacing.sm },
   notNowReview: {
-    alignSelf: "center",
+    alignSelf: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
   leaveReviewLater: {
     minHeight: 74,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.xs,
@@ -3083,14 +2976,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xl,
   },
   publishedReviewHeading: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     gap: spacing.md,
   },
-  publishedStars: { flexDirection: "row", alignItems: "center", gap: 2 },
+  publishedStars: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   publishedComment: { fontSize: 17, lineHeight: 27 },
-  reportReviewAction: { alignSelf: "flex-start", paddingVertical: spacing.sm },
+  reportReviewAction: { alignSelf: 'flex-start', paddingVertical: spacing.sm },
   reviewExperience: {
     gap: spacing.md,
     borderLeftWidth: 3,
@@ -3111,16 +3004,36 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   disputeLink: {
-    alignSelf: "center",
+    alignSelf: 'center',
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.sm,
   },
+  cancelTaskLink: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  cancellationSummary: {
+    gap: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.xs,
+    paddingTop: spacing.xl,
+  },
+  cancellationAmounts: {
+    flexDirection: 'row',
+    gap: spacing.xl,
+    marginTop: spacing.sm,
+  },
+  cancellationAmountItem: { flex: 1, gap: 3 },
   section: { gap: spacing.md },
   bidCard: { gap: spacing.md },
   bidRow: {
     minHeight: 84,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.md,
     paddingVertical: spacing.md,
   },
@@ -3128,66 +3041,85 @@ const styles = StyleSheet.create({
     width: 54,
     height: 54,
     borderRadius: 27,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  bidAvatarImage: { width: "100%", height: "100%" },
+  bidAvatarImage: { width: '100%', height: '100%' },
   bidSummary: { flex: 1, gap: 4 },
-  inlineMeta: { flexDirection: "row", alignItems: "center", gap: 5 },
-  bidPrice: { alignItems: "flex-end", gap: spacing.xs },
+  inlineMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  bidPrice: { alignItems: 'flex-end', gap: spacing.xs },
   form: { gap: spacing.lg },
+  fieldGroup: { gap: spacing.xs },
   useBudgetAction: {
     minHeight: 24,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 5,
     paddingHorizontal: 2,
   },
   notice: { gap: spacing.md },
   gallerySection: { gap: spacing.sm },
   galleryHeading: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   gallery: { gap: spacing.sm, paddingRight: spacing.lg },
   taskImage: { width: 148, height: 116, borderRadius: radius.lg },
   modalKeyboard: { flex: 1 },
   overlay: {
     flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(7,13,30,0.65)",
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(7,13,30,0.65)',
   },
   modal: {
-    maxHeight: "92%",
+    maxHeight: '92%',
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     paddingTop: spacing.sm,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   journeyPromptOverlay: {
     flex: 1,
-    justifyContent: "center",
+    justifyContent: 'center',
     padding: spacing.xl,
-    backgroundColor: "rgba(7,13,30,0.72)",
+    backgroundColor: 'rgba(7,13,30,0.72)',
   },
   journeyPrompt: {
-    position: "relative",
-    width: "100%",
+    position: 'relative',
+    width: '100%',
     maxWidth: 430,
-    alignSelf: "center",
+    alignSelf: 'center',
     gap: spacing.md,
     borderRadius: radius.xl,
     padding: spacing.xl,
     paddingTop: spacing.xxl,
   },
-  reviewPrompt: {
-    position: "relative",
-    width: "100%",
+  lifecycleReminderPrompt: {
+    position: 'relative',
+    width: '100%',
     maxWidth: 430,
-    maxHeight: "92%",
-    alignSelf: "center",
+    alignSelf: 'center',
+    gap: spacing.md,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    paddingTop: spacing.xxl,
+  },
+  lifecycleReminderMark: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  reviewPrompt: {
+    position: 'relative',
+    width: '100%',
+    maxWidth: 430,
+    maxHeight: '92%',
+    alignSelf: 'center',
     gap: spacing.md,
     borderRadius: radius.xl,
     padding: spacing.xl,
@@ -3198,48 +3130,48 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 34,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: spacing.xs,
   },
   manualArrivalIcon: {
     width: 62,
     height: 62,
     borderRadius: 31,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sosSeal: {
     width: 68,
     height: 68,
     borderRadius: 34,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   reviewPromptTitle: { maxWidth: 320, lineHeight: 31 },
   reviewPromptDescription: { lineHeight: 22, marginBottom: spacing.xs },
   reviewPromptStars: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: spacing.xs,
   },
   reviewPromptStar: { paddingVertical: spacing.xs },
   journeyPromptClose: {
-    position: "absolute",
+    position: 'absolute',
     zIndex: 2,
     top: spacing.md,
     right: spacing.md,
     width: 38,
     height: 38,
     borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   journeyArtwork: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "stretch",
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'stretch',
     paddingRight: spacing.xxl,
     marginBottom: spacing.sm,
   },
@@ -3247,20 +3179,20 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   routePath: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: spacing.sm,
   },
   routeLine: { flex: 1, height: 2, borderRadius: 1, opacity: 0.45 },
   journeyPromptTitle: { maxWidth: 320, lineHeight: 31 },
   journeyPromptDescription: { lineHeight: 22, marginBottom: spacing.sm },
   notYetAction: {
-    alignSelf: "center",
+    alignSelf: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
@@ -3273,63 +3205,102 @@ const styles = StyleSheet.create({
     width: 42,
     height: 5,
     borderRadius: 3,
-    alignSelf: "center",
+    alignSelf: 'center',
     marginVertical: spacing.sm,
+  },
+  cancellationSheet: {
+    gap: spacing.lg,
+    padding: spacing.xl,
+    paddingBottom: spacing.xxxl,
+  },
+  cancellationHeading: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  cancellationClose: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quoteBreakdown: {
+    gap: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.lg,
+  },
+  quoteLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  reasonList: { gap: spacing.xs },
+  reasonOption: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.sm,
   },
   applicantSheet: {
     gap: spacing.xl,
     padding: spacing.xl,
     paddingBottom: spacing.xxxl,
   },
-  applicantHero: { alignItems: "center", gap: spacing.xs },
+  applicantHero: { alignItems: 'center', gap: spacing.xs },
   applicantAvatar: {
     width: 104,
     height: 104,
     borderRadius: 52,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: spacing.sm,
   },
-  applicantName: { textAlign: "center" },
+  applicantName: { textAlign: 'center' },
   identitySignal: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 5,
     marginTop: spacing.sm,
   },
   identityNote: {
     maxWidth: 310,
-    textAlign: "center",
+    textAlign: 'center',
     lineHeight: 19,
     marginTop: spacing.xs,
   },
   trustStrip: {
     minHeight: 154,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "stretch",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
     gap: spacing.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingVertical: spacing.lg,
   },
-  trustMetric: { width: "45%", justifyContent: "center", gap: 2 },
+  trustMetric: { width: '45%', justifyContent: 'center', gap: 2 },
   proposalBand: {
     minHeight: 94,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     borderRadius: radius.lg,
     padding: spacing.lg,
   },
   editorialSection: { gap: spacing.sm },
   reviewSectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  skillWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  skillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   skillChip: {
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
@@ -3341,8 +3312,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   reviewHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
 });

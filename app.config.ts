@@ -4,10 +4,35 @@ import { resolve } from 'node:path';
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const plugins = [...(config.plugins ?? [])];
-  const mapLibrePlugin = '@maplibre/maplibre-react-native';
+  const requiredPlugins = [
+    '@maplibre/maplibre-react-native',
+    '@react-native-community/datetimepicker',
+  ];
 
-  if (!plugins.some((plugin) => (Array.isArray(plugin) ? plugin[0] : plugin) === mapLibrePlugin)) {
-    plugins.push(mapLibrePlugin);
+  for (const pluginName of requiredPlugins) {
+    if (!plugins.some((plugin) => (Array.isArray(plugin) ? plugin[0] : plugin) === pluginName)) {
+      plugins.push(pluginName);
+    }
+  }
+  if (
+    !plugins.some(
+      (plugin) => (Array.isArray(plugin) ? plugin[0] : plugin) === 'expo-speech-recognition',
+    )
+  ) {
+    plugins.push([
+      'expo-speech-recognition',
+      {
+        microphonePermission:
+          'Allow TaskGrid to hear your task description while you hold the microphone button.',
+        speechRecognitionPermission:
+          'Allow TaskGrid to turn your spoken task description into editable text.',
+        androidSpeechServicePackages: [
+          'com.google.android.googlequicksearchbox',
+          'com.google.android.as',
+          'com.samsung.android.bixby.agent',
+        ],
+      },
+    ]);
   }
 
   return {

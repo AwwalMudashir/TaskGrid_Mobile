@@ -1,39 +1,83 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { EmptyState } from '@/src/components/ui/EmptyState';
 import { RecommendedWorkerSkeleton } from '@/src/components/ui/SkeletonLoader';
-import type { WorkerSummary } from '@/src/features/auth/types';
+import type { WorkerRecommendations } from '@/src/features/auth/types';
 import { discoveryApi } from '@/src/lib/api';
 import { radius, spacing, useAppTheme } from '@/src/theme';
 
 export function RecommendedWorkers() {
   const { colors } = useAppTheme();
-  const [workers, setWorkers] = useState<WorkerSummary[] | null>(null);
-  useEffect(() => {
+  const router = useRouter();
+  const [feed, setFeed] = useState<WorkerRecommendations | null>(null);
+  const [failed, setFailed] = useState(false);
+  function load(forceRefresh = false) {
+    setFailed(false);
+    setFeed(null);
     discoveryApi
-      .workers()
-      .then(setWorkers)
-      .catch(() => setWorkers([]));
+      .workers(forceRefresh)
+      .then(setFeed)
+      .catch(() => {
+        setFailed(true);
+        setFeed({ taskId: null, taskTitle: null, workers: [] });
+      });
+  }
+  useEffect(() => {
+    load();
   }, []);
+  const workers = feed?.workers ?? null;
   return (
     <View style={styles.section}>
       <View>
         <AppText variant="subtitle">Recommended workers</AppText>
         <AppText variant="caption" color={colors.textMuted}>
-          Recently joined active workers
+          {failed
+            ? 'Recommendations are temporarily unavailable'
+            : feed?.taskTitle
+              ? `Matched for ${feed.taskTitle}`
+              : 'Recommendations begin with an open task'}
         </AppText>
       </View>
       {workers === null ? (
         <RecommendedWorkerSkeleton />
       ) : workers.length === 0 ? (
         <EmptyState
-          icon="people-outline"
-          title="No workers available yet"
-          description="Verified workers will appear here as they join TaskGrid."
+          icon={failed ? 'refresh-outline' : feed?.taskId ? 'people-outline' : 'sparkles-outline'}
+          title={
+            failed
+              ? "We couldn't load matches"
+              : feed?.taskId
+                ? 'No close matches yet'
+                : 'Start with the work you need'
+          }
+          description={
+            failed
+              ? 'Check your connection and try again.'
+              : feed?.taskId
+                ? 'We will refresh this list as suitable verified workers become available.'
+                : 'Create a task first so recommendations can use its skill, location and timing.'
+          }
+          action={
+            failed || !feed?.taskId ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => (failed ? load(true) : router.push('/task/new'))}
+                style={({ pressed }) => [
+                  styles.createAction,
+                  { backgroundColor: colors.primary, opacity: pressed ? 0.78 : 1 },
+                ]}
+              >
+                <AppText variant="button" color={colors.textOnPrimary}>
+                  {failed ? 'Try again' : 'Create a task'}
+                </AppText>
+              </Pressable>
+            ) : null
+          }
         />
       ) : (
         <ScrollView
@@ -99,6 +143,11 @@ export function RecommendedWorkers() {
                     </AppText>
                   </View>
                 ) : null}
+                <View style={[styles.explanation, { borderTopColor: colors.divider }]}>
+                  <AppText variant="caption" color={colors.textSecondary} numberOfLines={3}>
+                    {worker.recommendationExplanation}
+                  </AppText>
+                </View>
               </View>
             );
           })}
@@ -127,4 +176,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  explanation: { borderTopWidth: 1, paddingTop: spacing.sm },
+  createAction: {
+    minHeight: 44,
+    borderRadius: radius.md,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
 });

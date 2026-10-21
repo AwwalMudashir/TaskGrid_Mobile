@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/src/components/ui/AppText';
@@ -21,18 +21,28 @@ export function RecommendedTasks() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const [tasks, setTasks] = useState<TaskSummary[] | null>(null);
-  useEffect(() => {
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
     discoveryApi
       .tasks()
-      .then(setTasks)
-      .catch(() => setTasks([]));
-  }, []);
+        .then((items) => {
+          if (active) setTasks(items);
+        })
+        .catch(() => {
+          if (active) setTasks([]);
+        });
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
   return (
     <View style={styles.section}>
       <View>
         <AppText variant="subtitle">Recommended tasks</AppText>
         <AppText variant="caption" color={colors.textMuted}>
-          Latest five open opportunities
+          Skills lead the score, followed by distance, similar work and freshness
         </AppText>
       </View>
       {tasks === null ? (
@@ -40,8 +50,15 @@ export function RecommendedTasks() {
       ) : tasks.length === 0 ? (
         <EmptyState
           icon="sparkles-outline"
-          title="Nothing open right now"
-          description="You’re all caught up. New tasks will appear here as soon as clients post them."
+          title="No close matches yet"
+          description="No open task currently meets your match level. You can review it from Profile."
+          action={
+            <Pressable onPress={() => router.push('/(tabs)/profile/recommendations' as never)}>
+              <AppText variant="button" color={colors.primary}>
+                Review match level
+              </AppText>
+            </Pressable>
+          }
         />
       ) : (
         <View style={styles.list}>
@@ -62,15 +79,33 @@ export function RecommendedTasks() {
                 <Ionicons name="briefcase-outline" size={20} color={colors.primary} />
               </View>
               <View style={styles.copy}>
-                <AppText variant="bodyMedium" numberOfLines={1}>
-                  {task.title}
-                </AppText>
+                <View style={styles.titleRow}>
+                  <AppText variant="bodyMedium" numberOfLines={1} style={styles.title}>
+                    {task.title}
+                  </AppText>
+                  <View style={[styles.score, { backgroundColor: colors.successSoft }]}>
+                    <AppText variant="caption" color={colors.success}>
+                      {task.recommendationScore}% match
+                    </AppText>
+                  </View>
+                </View>
                 <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
                   {task.category} · {task.locationDescription}
                 </AppText>
+                <AppText variant="caption" color={colors.textSecondary} numberOfLines={2}>
+                  {task.recommendationExplanation}
+                </AppText>
+                {task.distanceKm != null ? (
+                  <AppText variant="caption" color={colors.primary}>
+                    {task.distanceKm.toFixed(1)} km
+                    {task.estimatedTravelMinutes != null
+                      ? ` · about ${task.estimatedTravelMinutes} min`
+                      : ''}
+                  </AppText>
+                ) : null}
               </View>
               <AppText variant="bodyMedium" color={colors.primary}>
-                {task.budget == null ? 'Open bid' : money.format(task.budget)}
+                {task.budget == null ? 'Price unavailable' : money.format(task.budget)}
               </AppText>
             </Pressable>
           ))}
@@ -84,7 +119,7 @@ const styles = StyleSheet.create({
   section: { gap: spacing.md },
   list: { gap: spacing.sm },
   card: {
-    minHeight: 72,
+    minHeight: 96,
     borderWidth: 1,
     borderRadius: radius.lg,
     padding: spacing.md,
@@ -100,4 +135,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   copy: { flex: 1, gap: 2 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  title: { flex: 1 },
+  score: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
 });

@@ -66,6 +66,9 @@ export default function TaskDisputeScreen() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [closePromptVisible, setClosePromptVisible] = useState(false);
+  const [visibleParty, setVisibleParty] = useState<'CLIENT' | 'RUNNER'>(
+    user?.role === 'RUNNER' ? 'RUNNER' : 'CLIENT',
+  );
 
   const isClient = user?.role === 'CLIENT';
   const reasons = isClient ? CLIENT_REASONS : WORKER_REASONS;
@@ -77,6 +80,8 @@ export default function TaskDisputeScreen() {
     ? !['RESOLUTION_PENDING', 'RESOLVED', 'CLOSED'].includes(dispute.status)
     : false;
   const disputeClosed = dispute?.status === 'CLOSED';
+  const resolutionPending = dispute?.status === 'RESOLUTION_PENDING';
+  const disputeResolved = dispute?.status === 'RESOLVED';
   const canClose = Boolean(
     dispute &&
     dispute.raisedById === user?.id &&
@@ -98,26 +103,36 @@ export default function TaskDisputeScreen() {
     [task],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (!taskId) return;
-    setLoading(true);
-    setError('');
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const nextTask = await taskApi.detail(taskId);
       setTask(nextTask);
       setDispute(nextTask.disputeStatus ? await taskApi.dispute(taskId) : null);
     } catch (cause) {
-      setError(
-        cause instanceof ApiError ? cause.message : "We couldn't load this case. Try again.",
-      );
+      if (!silent) {
+        setError(
+          cause instanceof ApiError ? cause.message : "We couldn't load this case. Try again.",
+        );
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [taskId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (dispute?.status !== 'RESOLUTION_PENDING') return;
+    const timer = setInterval(() => void load(true), 10000);
+    return () => clearInterval(timer);
+  }, [dispute?.status, load]);
 
   async function uploadSelected(current: TaskDispute) {
     if (!taskId) return { latest: current, complete: false };
@@ -249,27 +264,63 @@ export default function TaskDisputeScreen() {
             style={[
               styles.caseHero,
               {
-                backgroundColor: disputeClosed ? colors.successSoft : colors.warningSoft,
+                backgroundColor:
+                  disputeClosed || disputeResolved
+                    ? colors.successSoft
+                    : resolutionPending
+                      ? colors.infoSoft
+                      : colors.warningSoft,
               },
             ]}
           >
             <View style={[styles.shield, { backgroundColor: colors.surface }]}>
               <Ionicons
-                name={disputeClosed ? 'checkmark-circle-outline' : 'shield-checkmark-outline'}
+                name={
+                  disputeClosed || disputeResolved
+                    ? 'checkmark-circle-outline'
+                    : resolutionPending
+                      ? 'time-outline'
+                      : 'shield-checkmark-outline'
+                }
                 size={28}
-                color={disputeClosed ? colors.success : colors.warning}
+                color={
+                  disputeClosed || disputeResolved
+                    ? colors.success
+                    : resolutionPending
+                      ? colors.info
+                      : colors.warning
+                }
               />
             </View>
-            <AppText variant="eyebrow" color={disputeClosed ? colors.success : colors.warning}>
+            <AppText
+              variant="eyebrow"
+              color={
+                disputeClosed || disputeResolved
+                  ? colors.success
+                  : resolutionPending
+                    ? colors.info
+                    : colors.warning
+              }
+            >
               {displayLabel(dispute.status)}
             </AppText>
             <AppText variant="title">
-              {disputeClosed ? 'This dispute is closed' : 'The payment is protected'}
+              {disputeClosed
+                ? 'This dispute is closed'
+                : disputeResolved
+                  ? 'The dispute is resolved'
+                  : resolutionPending
+                    ? 'Decision recorded'
+                    : 'The payment is protected'}
             </AppText>
             <AppText color={colors.textSecondary}>
               {disputeClosed
                 ? 'The person who opened the case closed it. The normal task and payment flow has resumed.'
-                : 'No release or refund can happen until TaskGrid records a decision.'}
+                : disputeResolved
+                  ? 'The approved release and refund have been completed.'
+                  : resolutionPending
+                    ? 'Paystack is processing the client refund. The worker share will be released after confirmation.'
+                    : 'No release or refund can happen until TaskGrid records a decision.'}
             </AppText>
           </View>
 
@@ -282,15 +333,37 @@ export default function TaskDisputeScreen() {
             </AppText>
           </View>
 
+          <View style={[styles.partySwitcher, { borderBottomColor: colors.divider }]}>
+            {(['CLIENT', 'RUNNER'] as const).map((party) => {
+              const selected = visibleParty === party;
+              return (
+                <Pressable
+                  key={party}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected }}
+                  onPress={() => setVisibleParty(party)}
+                  style={[
+                    styles.partySwitch,
+                    { borderBottomColor: selected ? colors.primary : 'transparent' },
+                  ]}
+                >
+                  <AppText variant="bodyMedium" color={selected ? colors.primary : colors.textMuted}>
+                    {party === 'CLIENT' ? 'Client' : 'Worker'}
+                  </AppText>
+                </Pressable>
+              );
+            })}
+          </View>
           <PartyEvidence
-            title="Client's account"
-            statement={dispute.clientStatement}
-            urls={dispute.clientEvidenceUrls}
-          />
-          <PartyEvidence
-            title="Worker's account"
-            statement={dispute.runnerStatement}
-            urls={dispute.runnerEvidenceUrls}
+            title={visibleParty === 'CLIENT' ? "Client's account" : "Worker's account"}
+            statement={
+              visibleParty === 'CLIENT' ? dispute.clientStatement : dispute.runnerStatement
+            }
+            urls={
+              visibleParty === 'CLIENT'
+                ? dispute.clientEvidenceUrls
+                : dispute.runnerEvidenceUrls
+            }
           />
 
           {acceptsContributions ? (
@@ -360,7 +433,7 @@ export default function TaskDisputeScreen() {
           {dispute.finalOutcome ? (
             <SurfaceCard style={styles.section}>
               <AppText variant="eyebrow" color={colors.success}>
-                Final decision
+                {resolutionPending ? 'Approved decision' : 'Final decision'}
               </AppText>
               <AppText variant="subtitle">{displayLabel(dispute.finalOutcome)}</AppText>
               {dispute.resolutionNote ? (
@@ -638,6 +711,13 @@ const styles = StyleSheet.create({
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   photo: { width: 84, height: 84, borderRadius: radius.md },
   amountRow: { flexDirection: 'row', gap: spacing.xl, paddingTop: spacing.sm },
+  partySwitcher: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
+  partySwitch: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    borderBottomWidth: 2,
+  },
   historyRow: { flexDirection: 'row', gap: spacing.md, minHeight: 70 },
   historyRail: { width: 18, alignItems: 'center' },
   historyDot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },

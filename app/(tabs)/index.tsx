@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
@@ -10,9 +10,9 @@ import { NoticeCard } from '@/src/components/ui/NoticeCard';
 import { Screen } from '@/src/components/ui/Screen';
 import { SurfaceCard } from '@/src/components/ui/SurfaceCard';
 import { useAuth } from '@/src/features/auth/AuthContext';
-import { RecommendedWorkers } from '@/src/components/home/RecommendedWorkers';
 import { RecommendedTasks } from '@/src/components/home/RecommendedTasks';
 import { WorkerLocationMap } from '@/src/components/home/WorkerLocationMap';
+import { TaskGridAssistantCard } from '@/src/components/home/TaskGridAssistantCard';
 import { radius, shadows, spacing, useAppTheme } from '@/src/theme';
 
 function greeting() {
@@ -90,6 +90,14 @@ export default function HomeScreen() {
           </Pressable>
         </LinearGradient>
       </AnimatedEntrance>
+      {user ? (
+        <AnimatedEntrance delay={105}>
+          <TaskGridAssistantCard
+            role={user.role}
+            onPress={() => router.push('/assistant' as Href)}
+          />
+        </AnimatedEntrance>
+      ) : null}
       <AnimatedEntrance delay={130} style={styles.section}>
         <View>
           <AppText variant="subtitle">Your workspace</AppText>
@@ -130,9 +138,11 @@ export default function HomeScreen() {
           ) : null}
         </SurfaceCard>
       </AnimatedEntrance>
-      <AnimatedEntrance delay={165}>
-        {isWorker ? <RecommendedTasks /> : <RecommendedWorkers />}
-      </AnimatedEntrance>
+      {isWorker ? (
+        <AnimatedEntrance delay={165}>
+          <RecommendedTasks />
+        </AnimatedEntrance>
+      ) : null}
       {isWorker ? (
         <AnimatedEntrance delay={195}>
           <WorkerLocationMap />

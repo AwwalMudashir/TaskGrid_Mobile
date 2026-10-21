@@ -34,6 +34,11 @@ export type TaskNotificationData = {
     | 'CHAT_MESSAGE'
     | 'TASK_COMPLETION_SUBMITTED'
     | 'TASK_REVIEW_REMINDER'
+    | 'TASK_PROGRESS_REMINDER'
+    | 'TASK_JOURNEY_DELAY'
+    | 'TASK_PROGRESS_CONFIRMED'
+    | 'TASK_CANCELLED'
+    | 'CANCELLATION_REFUND_COMPLETED'
     | 'TASK_DISPUTED'
     | 'DISPUTE_RESOLVED'
     | 'TASK_EARNINGS_RELEASED'
@@ -41,6 +46,8 @@ export type TaskNotificationData = {
     | 'WITHDRAWAL_FAILED';
   taskId?: string;
   withdrawalId?: string;
+  reminderId?: string;
+  reminderType?: 'ARRIVAL_PROGRESS' | 'JOURNEY_DELAY';
   route?: string;
 };
 
