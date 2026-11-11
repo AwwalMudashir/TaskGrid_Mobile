@@ -99,9 +99,10 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
       >
         <View style={styles.center}>
           <Animated.Image
+            accessibilityLabel="TaskGrid logo"
             accessibilityIgnoresInvertColors
             resizeMode="contain"
-            source={require('../../assets/images/auth/login-trust.png')}
+            source={require('../../assets/images/branding/taskgrid-mark.png')}
             style={[
               styles.artwork,
               { transform: [{ scale: combinedScale }, { translateY: combinedOffset }] },
@@ -114,7 +115,7 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
               TaskGrid
             </AppText>
             <AppText variant="body" color="rgba(255,255,255,0.78)" style={styles.tagline}>
-              Trusted local work, matched intelligently and paid securely.
+              Trusted hands. Tasks done.
             </AppText>
           </Animated.View>
         </View>
@@ -140,7 +141,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.xxxl,
   },
-  artwork: { width: 190, height: 206, zIndex: 2 },
+  artwork: { width: 196, height: 196, zIndex: 2 },
   copy: { alignItems: 'center', marginTop: spacing.lg, gap: spacing.sm },
   tagline: { textAlign: 'center', maxWidth: 300 },
   footer: { alignItems: 'center', gap: spacing.md, paddingBottom: 46 },

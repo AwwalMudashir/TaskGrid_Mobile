@@ -74,11 +74,11 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "home" : "home-outline"}
               color={color}
-              size={size}
+              size={20}
             />
           ),
         }}
@@ -93,11 +93,11 @@ export default function TabLayout() {
               buttonProps={props as NativeTabButtonProps}
             />
           ),
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "clipboard" : "clipboard-outline"}
               color={color}
-              size={size}
+              size={20}
             />
           ),
         }}
@@ -112,11 +112,11 @@ export default function TabLayout() {
               buttonProps={props as NativeTabButtonProps}
             />
           ),
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "chatbubble" : "chatbubble-outline"}
               color={color}
-              size={size}
+              size={20}
             />
           ),
         }}
@@ -135,11 +135,24 @@ export default function TabLayout() {
                   />
                 )
               : undefined,
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "wallet" : "wallet-outline"}
               color={color}
-              size={size}
+              size={20}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="my-ai"
+        options={{
+          title: "My AI",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? "sparkles" : "sparkles-outline"}
+              color={color}
+              size={20}
             />
           ),
         }}
@@ -148,17 +161,18 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: "Profile",
+          popToTopOnBlur: true,
           tabBarButton: (props) => (
             <MeasuredTabButton
               target="profile"
               buttonProps={props as NativeTabButtonProps}
             />
           ),
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "person" : "person-outline"}
               color={color}
-              size={size}
+              size={20}
             />
           ),
         }}

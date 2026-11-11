@@ -24,7 +24,13 @@ import type {
 } from '@/src/features/auth/types';
 import { markFeatureTourPending } from '@/src/features/onboarding/feature-tour-storage';
 import { ApiError, authApi, mediaApi, skillsApi } from '@/src/lib/api';
-import { isEmail, isPhone, normaliseNigerianPhone, passwordError } from '@/src/lib/validation';
+import {
+  isEmail,
+  isPhone,
+  normaliseNigerianPhone,
+  passwordError,
+  stripTrailingPasswordWhitespace,
+} from '@/src/lib/validation';
 import { radius, spacing, useAppTheme } from '@/src/theme';
 
 const initialDraft: RegistrationDraft = {
@@ -105,9 +111,11 @@ export default function RegisterScreen() {
         return 'Choose your primary skill.';
     }
     if (step === 2) {
-      const issue = passwordError(draft.password);
+      const password = stripTrailingPasswordWhitespace(draft.password);
+      const confirmation = stripTrailingPasswordWhitespace(draft.confirmPassword);
+      const issue = passwordError(password);
       if (issue) return issue;
-      if (draft.password !== draft.confirmPassword) return 'The passwords do not match.';
+      if (password !== confirmation) return 'The passwords do not match.';
       if (!draft.acceptedTerms) return 'Accept the Terms and Privacy Policy to continue.';
     }
     return '';
@@ -120,6 +128,15 @@ export default function RegisterScreen() {
   }
 
   async function submit() {
+    const password = stripTrailingPasswordWhitespace(draft.password);
+    const confirmation = stripTrailingPasswordWhitespace(draft.confirmPassword);
+    if (password !== draft.password || confirmation !== draft.confirmPassword) {
+      setDraft((current) => ({
+        ...current,
+        password,
+        confirmPassword: confirmation,
+      }));
+    }
     const issue = validateCurrentStep();
     setError(issue);
     if (issue) return;
@@ -132,7 +149,7 @@ export default function RegisterScreen() {
         fullName: draft.fullName.trim(),
         email: draft.email.trim().toLowerCase(),
         phoneNumber: normaliseNigerianPhone(draft.phoneNumber),
-        password: draft.password,
+        password,
         primarySkillId: draft.accountType === 'WORKER' ? draft.primarySkillId : undefined,
         additionalSkillIds: draft.accountType === 'WORKER' ? draft.additionalSkillIds : undefined,
         profilePictureUrl: uploadedImage?.url,
@@ -371,6 +388,7 @@ export default function RegisterScreen() {
               placeholder="At least 8 characters"
               value={draft.password}
               onChangeText={(v) => update('password', v)}
+              onBlur={() => update('password', stripTrailingPasswordWhitespace(draft.password))}
               secureTextEntry
               autoComplete="new-password"
             />
@@ -379,6 +397,12 @@ export default function RegisterScreen() {
               placeholder="Enter it again"
               value={draft.confirmPassword}
               onChangeText={(v) => update('confirmPassword', v)}
+              onBlur={() =>
+                update(
+                  'confirmPassword',
+                  stripTrailingPasswordWhitespace(draft.confirmPassword),
+                )
+              }
               secureTextEntry
               autoComplete="new-password"
             />

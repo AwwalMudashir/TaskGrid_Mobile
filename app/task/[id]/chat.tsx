@@ -29,8 +29,6 @@ import { taskApi, type TaskDetail } from '@/src/features/tasks/task-api';
 import { ApiError } from '@/src/lib/api';
 import { radius, spacing, useAppTheme } from '@/src/theme';
 
-const closedStatuses = new Set(['PAID', 'REFUNDED', 'CANCELLED']);
-
 export default function TaskChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -63,7 +61,7 @@ export default function TaskChatScreen() {
     if (!task) return 'Task conversation';
     return task.clientId === user?.id ? (task.assignedRunnerName ?? 'Worker') : task.clientName;
   }, [task, user?.id]);
-  const readOnly = Boolean(task && closedStatuses.has(task.status));
+  const readOnly = Boolean(task && !task.conversationAvailable);
 
   const stopTyping = useCallback(() => {
     if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
@@ -97,10 +95,14 @@ export default function TaskChatScreen() {
       if (!id) return;
       if (!quiet) nextPage === 0 ? setLoading(true) : setLoadingMore(true);
       try {
-        const [history, details] = await Promise.all([
-          chatApi.messages(id, nextPage),
-          nextPage === 0 && !quiet ? taskApi.detail(id) : Promise.resolve(null),
-        ]);
+        const details = nextPage === 0 ? await taskApi.detail(id, true) : null;
+        if (details && !details.conversationAvailable) {
+          setTask(details);
+          setMessages([]);
+          router.replace('/(tabs)/messages' as never);
+          return;
+        }
+        const history = await chatApi.messages(id, nextPage);
         setMessages((current) => {
           const combined =
             nextPage === 0 && !quiet ? history.items : [...current, ...history.items];
@@ -114,6 +116,14 @@ export default function TaskChatScreen() {
         setHasNext((current) => (quiet && nextPage === 0 ? current : history.hasNext));
         setError('');
       } catch (cause) {
+        if (
+          cause instanceof ApiError &&
+          cause.code === 409 &&
+          cause.message.toLowerCase().includes('conversation has closed')
+        ) {
+          router.replace('/(tabs)/messages' as never);
+          return;
+        }
         if (!quiet) {
           setError(
             cause instanceof ApiError ? cause.message : "We couldn't load this conversation.",
@@ -126,7 +136,7 @@ export default function TaskChatScreen() {
         }
       }
     },
-    [id],
+    [id, router],
   );
 
   useFocusEffect(
@@ -135,6 +145,7 @@ export default function TaskChatScreen() {
       let disposed = false;
       let connection: ChatChannelConnection | undefined;
       let fallbackTimer: ReturnType<typeof setInterval> | undefined;
+      let availabilityTimer: ReturnType<typeof setInterval> | undefined;
 
       const stopFallback = () => {
         if (fallbackTimer) clearInterval(fallbackTimer);
@@ -201,6 +212,17 @@ export default function TaskChatScreen() {
           }
         }
       });
+      availabilityTimer = setInterval(() => {
+        void taskApi
+          .detail(id, true)
+          .then((details) => {
+            if (!details.conversationAvailable) {
+              stopTyping();
+              router.replace('/(tabs)/messages' as never);
+            }
+          })
+          .catch(() => undefined);
+      }, 15_000);
 
       return () => {
         disposed = true;
@@ -210,11 +232,12 @@ export default function TaskChatScreen() {
         readTimerRef.current = null;
         if (remoteTypingTimerRef.current) clearTimeout(remoteTypingTimerRef.current);
         remoteTypingTimerRef.current = null;
+        if (availabilityTimer) clearInterval(availabilityTimer);
         setParticipantTyping(false);
         connectionRef.current = null;
         void connection?.disconnect();
       };
-    }, [id, load, stopTyping]),
+    }, [id, load, router, stopTyping]),
   );
 
   async function send() {
@@ -230,6 +253,14 @@ export default function TaskChatScreen() {
       setDraft('');
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (cause) {
+      if (
+        cause instanceof ApiError &&
+        cause.code === 409 &&
+        cause.message.toLowerCase().includes('conversation has closed')
+      ) {
+        router.replace('/(tabs)/messages' as never);
+        return;
+      }
       setError(cause instanceof ApiError ? cause.message : "We couldn't send this message.");
     } finally {
       setSending(false);

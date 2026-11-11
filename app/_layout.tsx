@@ -89,6 +89,10 @@ function RootNavigator() {
           <Stack.Screen name="payout-account" />
           <Stack.Screen name="transaction-history" />
           <Stack.Screen name="emergency-contact" />
+          <Stack.Screen name="identity-verification" />
+          <Stack.Screen name="legal/privacy-policy" />
+          <Stack.Screen name="support" />
+          <Stack.Screen name="task-recommendations" />
           <Stack.Screen name="assistant" />
           <Stack.Screen name="task/new" />
           <Stack.Screen name="task/[id]" />

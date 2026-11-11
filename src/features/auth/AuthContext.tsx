@@ -12,6 +12,7 @@ import { unregisterCurrentDeviceForPush } from '@/src/features/notifications/pus
 import { stopJourneySharingBeforeSignOut } from '@/src/features/tasks/journey-location-task';
 import { ApiError, authApi, profileApi } from '@/src/lib/api';
 import { clearSessionTokens, getSessionTokens, saveSessionTokens } from '@/src/lib/token-storage';
+import { stripTrailingPasswordWhitespace } from '@/src/lib/validation';
 
 type AuthContextValue = {
   user: User | null;
@@ -72,7 +73,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       user,
       isLoading,
       async signIn(email, password) {
-        const session = await authApi.login(email.trim().toLowerCase(), password);
+        const session = await authApi.login(
+          email.trim().toLowerCase(),
+          stripTrailingPasswordWhitespace(password),
+        );
         await saveSessionTokens(session);
         setUser(session.user);
       },

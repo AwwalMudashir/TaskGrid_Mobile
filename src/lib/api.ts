@@ -503,6 +503,12 @@ export const kycApi = {
       authenticated: true,
     });
   },
+  restartSession() {
+    return apiRequest<KycSession>('/kyc/session/restart', {
+      method: 'POST',
+      authenticated: true,
+    });
+  },
   status() {
     return apiRequest<KycStatusResult>('/kyc/status', { authenticated: true });
   },

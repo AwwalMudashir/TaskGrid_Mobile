@@ -38,6 +38,13 @@ type VoiceTaskAssistantProps = {
 
 const WAVE_HEIGHTS = [22, 36, 52, 68, 47, 31, 20];
 
+function skillIconName(skill: Skill | null | undefined): keyof typeof Ionicons.glyphMap {
+  const icon = skill?.iconName;
+  return icon && icon in Ionicons.glyphMap
+    ? (icon as keyof typeof Ionicons.glyphMap)
+    : 'construct-outline';
+}
+
 export function VoiceTaskAssistant({
   visible,
   skills,
@@ -62,28 +69,75 @@ export function VoiceTaskAssistant({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const committedTranscript = useRef('');
+  const transcriptRef = useRef('');
+  const segmentBaseTranscript = useRef('');
+  const keepListening = useRef(false);
+  const visibleRef = useRef(visible);
+  const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pulse = useRef(new Animated.Value(1)).current;
   const waveValues = useRef(WAVE_HEIGHTS.map(() => new Animated.Value(0.35))).current;
 
   useSpeechRecognitionEvent('start', () => setListening(true));
   useSpeechRecognitionEvent('end', () => {
+    committedTranscript.current = transcriptRef.current.trim();
+    if (keepListening.current && visibleRef.current) {
+      clearRecognitionRestart();
+      restartTimer.current = setTimeout(startRecognitionSegment, 250);
+      return;
+    }
     setListening(false);
-    committedTranscript.current = transcript.trim();
   });
   useSpeechRecognitionEvent('result', (event) => {
     const heard = event.results[0]?.transcript?.trim();
     if (!heard) return;
-    const combined = mergeTranscript(committedTranscript.current, heard);
+    const combined = mergeTranscript(segmentBaseTranscript.current, heard);
+    transcriptRef.current = combined;
     setTranscript(combined);
-    if (event.isFinal) committedTranscript.current = combined;
-  });
-  useSpeechRecognitionEvent('error', (event) => {
-    setListening(false);
-    committedTranscript.current = transcript.trim();
-    if (event.error !== 'aborted' && event.error !== 'no-speech') {
-      setError('We could not hear that clearly. You can try again or type instead.');
+    if (event.isFinal) {
+      committedTranscript.current = combined;
+      segmentBaseTranscript.current = combined;
     }
   });
+  useSpeechRecognitionEvent('error', (event) => {
+    committedTranscript.current = transcriptRef.current.trim();
+    if (event.error === 'aborted' || event.error === 'no-speech') return;
+
+    keepListening.current = false;
+    setListening(false);
+    console.warn('[TaskGrid voice] Speech recognition failed', event.error, event.message);
+    setError(speechRecognitionMessage(event.error));
+  });
+
+  function clearRecognitionRestart() {
+    if (restartTimer.current) {
+      clearTimeout(restartTimer.current);
+      restartTimer.current = null;
+    }
+  }
+
+  function startRecognitionSegment() {
+    clearRecognitionRestart();
+    if (!keepListening.current || !visibleRef.current) return;
+
+    segmentBaseTranscript.current = committedTranscript.current.trim();
+    try {
+      ExpoSpeechRecognitionModule.start({
+        // en-GB is broadly supported by Android recognisers and handles Nigerian English well.
+        lang: Platform.OS === 'android' ? 'en-GB' : 'en-NG',
+        interimResults: true,
+        // Android recognisers are more reliable in single segments. The end listener
+        // immediately starts the next segment while the user still wants to dictate.
+        continuous: false,
+        maxAlternatives: 1,
+        contextualStrings: ['TaskGrid', ...skills.slice(0, 20).map((skill) => skill.name)],
+      });
+    } catch (cause) {
+      keepListening.current = false;
+      setListening(false);
+      console.warn('[TaskGrid voice] Could not start speech recognition', cause);
+      setError('Voice input could not start. Check speech services and try again.');
+    }
+  }
 
   useEffect(() => {
     if (!listening) {
@@ -128,7 +182,22 @@ export function VoiceTaskAssistant({
     };
   }, [listening, pulse, waveValues]);
 
-  useEffect(() => () => ExpoSpeechRecognitionModule.abort(), []);
+  useEffect(() => {
+    visibleRef.current = visible;
+    if (!visible) {
+      keepListening.current = false;
+      clearRecognitionRestart();
+    }
+  }, [visible]);
+
+  useEffect(
+    () => () => {
+      keepListening.current = false;
+      clearRecognitionRestart();
+      ExpoSpeechRecognitionModule.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!visible) return;
@@ -153,7 +222,13 @@ export function VoiceTaskAssistant({
   async function toggleListening() {
     setError('');
     if (listening) {
+      keepListening.current = false;
+      clearRecognitionRestart();
       ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
+      setError('Voice input is unavailable. Enable Google speech recognition and try again.');
       return;
     }
     const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
@@ -162,18 +237,17 @@ export function VoiceTaskAssistant({
       return;
     }
     committedTranscript.current = transcript.trim();
-    ExpoSpeechRecognitionModule.start({
-      lang: 'en-NG',
-      interimResults: true,
-      continuous: true,
-      maxAlternatives: 1,
-      contextualStrings: ['TaskGrid', ...skills.slice(0, 20).map((skill) => skill.name)],
-    });
+    transcriptRef.current = transcript.trim();
+    keepListening.current = true;
+    setListening(true);
+    startRecognitionSegment();
   }
 
   function editTranscript(value: string) {
     setTranscript(value);
+    transcriptRef.current = value;
     committedTranscript.current = value.trim();
+    segmentBaseTranscript.current = value.trim();
   }
 
   async function prepareDraft() {
@@ -182,6 +256,8 @@ export function VoiceTaskAssistant({
       setError('Add a little more detail so we can prepare a useful task.');
       return;
     }
+    keepListening.current = false;
+    clearRecognitionRestart();
     ExpoSpeechRecognitionModule.stop();
     setLoading(true);
     setError('');
@@ -198,7 +274,7 @@ export function VoiceTaskAssistant({
       }
       setDraft(next);
       setTitle(next.title ?? '');
-      setDescription(next.description ?? note);
+      setDescription(next.description ?? '');
       setSelectedSkillId(next.skillId ?? '');
       setTaskLocation(next.locationDescription ?? taskLocation);
       setBudget(next.budget > 0 ? String(next.budget) : '');
@@ -253,6 +329,8 @@ export function VoiceTaskAssistant({
   }
 
   function close() {
+    keepListening.current = false;
+    clearRecognitionRestart();
     ExpoSpeechRecognitionModule.abort();
     if (draft?.auditId) void taskApi.assistantDecision(draft.auditId, false).catch(() => undefined);
     resetDraft();
@@ -587,9 +665,18 @@ function DetailsStep({
           onPress={onToggleCategory}
           style={[styles.selector, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
-          <AppText color={selectedSkill ? colors.text : colors.textMuted}>
-            {selectedSkill?.name ?? 'Choose a service'}
-          </AppText>
+          <View style={styles.categorySelection}>
+            <View style={[styles.categorySelectionIcon, { backgroundColor: colors.primarySoft }]}>
+              <Ionicons
+                name={skillIconName(selectedSkill)}
+                size={19}
+                color={selectedSkill ? colors.primary : colors.textMuted}
+              />
+            </View>
+            <AppText color={selectedSkill ? colors.text : colors.textMuted}>
+              {selectedSkill?.name ?? 'Choose a service'}
+            </AppText>
+          </View>
           <Ionicons
             name={categoryOpen ? 'chevron-up' : 'chevron-down'}
             size={19}
@@ -610,12 +697,19 @@ function DetailsStep({
                 onPress={() => onSelectSkill(skill.id)}
                 style={[styles.categoryOption, { borderBottomColor: colors.divider }]}
               >
-                <AppText
-                  variant={skill.id === selectedSkill?.id ? 'bodyMedium' : 'body'}
-                  color={skill.id === selectedSkill?.id ? colors.primary : colors.text}
-                >
-                  {skill.name}
-                </AppText>
+                <View style={styles.categoryOptionIdentity}>
+                  <Ionicons
+                    name={skillIconName(skill)}
+                    size={19}
+                    color={skill.id === selectedSkill?.id ? colors.primary : colors.textSecondary}
+                  />
+                  <AppText
+                    variant={skill.id === selectedSkill?.id ? 'bodyMedium' : 'body'}
+                    color={skill.id === selectedSkill?.id ? colors.primary : colors.text}
+                  >
+                    {skill.name}
+                  </AppText>
+                </View>
                 {skill.id === selectedSkill?.id ? (
                   <Ionicons name="checkmark" size={18} color={colors.primary} />
                 ) : null}
@@ -751,6 +845,22 @@ function mergeTranscript(base: string, incoming: string) {
   return `${stable} ${heard}`;
 }
 
+function speechRecognitionMessage(error: string) {
+  if (error === 'network' || error === 'network-timeout') {
+    return 'Speech recognition needs a connection right now. Check your internet and try again.';
+  }
+  if (error === 'language-not-supported') {
+    return 'Your phone speech service does not support this language yet. Update it and try again.';
+  }
+  if (error === 'service-not-allowed' || error === 'not-allowed') {
+    return 'Voice input is blocked on this phone. Allow microphone and speech access, then try again.';
+  }
+  if (error === 'audio-capture') {
+    return 'The microphone is being used by another app. Close it and try again.';
+  }
+  return 'We could not transcribe that. You can try again or type your task instead.';
+}
+
 function money(value: number) {
   return Number(value || 0).toLocaleString('en-NG', {
     minimumFractionDigits: 0,
@@ -809,6 +919,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
   },
+  categorySelection: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  categorySelectionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   categoryMenu: { maxHeight: 230, borderWidth: 1, borderRadius: radius.md },
   categoryOption: {
     minHeight: 52,
@@ -818,6 +936,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
   },
+  categoryOptionIdentity: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   locationHeading: {
     flexDirection: 'row',
     alignItems: 'flex-start',

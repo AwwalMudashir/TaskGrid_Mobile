@@ -8,6 +8,7 @@ import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
 import { AppText } from '@/src/components/ui/AppText';
 import { AuthHeader } from '@/src/components/ui/AuthHeader';
 import { Button } from '@/src/components/ui/Button';
+import { ConfirmationModal } from '@/src/components/ui/ConfirmationModal';
 import { NoticeCard } from '@/src/components/ui/NoticeCard';
 import { Screen } from '@/src/components/ui/Screen';
 import { SurfaceCard } from '@/src/components/ui/SurfaceCard';
@@ -37,7 +38,7 @@ const statusContent: Record<
   },
   PENDING: {
     title: 'Verification in progress',
-    description: 'Your details are being checked. Most test checks update within a few moments.',
+    description: 'Your details are being checked. Most results update within a few moments.',
     icon: 'hourglass-outline',
     tone: 'warning',
   },
@@ -140,12 +141,19 @@ export default function KycScreen() {
   const [showAppeal, setShowAppeal] = useState(false);
   const [appealReason, setAppealReason] = useState('');
   const [appealing, setAppealing] = useState(false);
+  const [restartPromptVisible, setRestartPromptVisible] = useState(false);
+  const [restarting, setRestarting] = useState(false);
 
-  const loadStatus = useCallback(async () => {
-    if (user?.role !== 'RUNNER') {
-      setLoading(false);
+  const leaveKyc = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
       return;
     }
+
+    router.replace('/(tabs)/profile');
+  }, [router]);
+
+  const loadStatus = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -164,28 +172,62 @@ export default function KycScreen() {
   );
 
   async function refreshAfterWidget(widgetResult: DojahLaunchResult) {
-    if (widgetResult === 'closed' || widgetResult === 'unknown') {
-      setNotice(
-        widgetResult === 'closed'
-          ? 'The Dojah window closed before a result was submitted. Your progress may still be saved. Tap Continue verification to resume.'
-          : 'Dojah closed without returning a verification result. Tap Continue verification to resume this attempt.',
-      );
-      return;
-    }
-
     setCheckingResult(true);
     setError('');
     try {
+      let latest: KycStatusResult;
       try {
-        setResult(await kycApi.sync());
+        latest = await kycApi.sync();
       } catch {
-        setResult(await kycApi.status());
+        latest = await kycApi.status();
       }
-      setNotice('Your verification status has been refreshed from Dojah.');
+      setResult(latest);
+
+      if (latest.status === 'VERIFIED') {
+        setNotice('Your identity has been verified successfully.');
+      } else if (latest.status === 'REJECTED') {
+        setNotice('Dojah completed this attempt. Review the result below before trying again.');
+      } else if (widgetResult === 'closed') {
+        setNotice(
+          'Verification was closed before completion. Your attempt is saved, so you can continue or restart it.',
+        );
+      } else if (widgetResult === 'failed') {
+        setNotice('The identity check did not complete. Review the status below or restart the attempt.');
+      } else {
+        setNotice('Your verification was submitted and its latest status is shown below.');
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
       setCheckingResult(false);
+    }
+  }
+
+  async function restartVerification() {
+    if (!user) return;
+    setRestartPromptVisible(false);
+    setRestarting(true);
+    setError('');
+    setNotice('');
+    try {
+      const session = await kycApi.restartSession();
+      setResult((current) =>
+        current
+          ? {
+              ...current,
+              referenceId: session.referenceId,
+              status: 'PENDING',
+              providerStatus: 'Not started',
+              failureReason: null,
+            }
+          : current,
+      );
+      const widgetResult = await launchDojahKyc(session, user);
+      await refreshAfterWidget(widgetResult);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setRestarting(false);
     }
   }
 
@@ -243,21 +285,10 @@ export default function KycScreen() {
     }
   }
 
-  if (user?.role !== 'RUNNER') {
-    return (
-      <Screen contentStyle={styles.screen}>
-        <AuthHeader title="Identity verification" />
-        <NoticeCard tone="info" icon="information-circle-outline" title="Worker-only check">
-          KYC is only required for worker accounts. Your client account does not need this step.
-        </NoticeCard>
-      </Screen>
-    );
-  }
-
   if (loading) {
     return (
       <Screen contentStyle={styles.screen}>
-        <AuthHeader title="Identity verification" />
+        <AuthHeader title="Identity verification" onBackPress={leaveKyc} />
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color={colors.primary} />
           <AppText color={colors.textSecondary}>Loading your verification status…</AppText>
@@ -269,7 +300,7 @@ export default function KycScreen() {
   if (!result && error) {
     return (
       <Screen contentStyle={styles.screen}>
-        <AuthHeader title="Identity verification" />
+        <AuthHeader title="Identity verification" onBackPress={leaveKyc} />
         <View style={styles.loadingState}>
           <View style={[styles.checkingOrb, { backgroundColor: colors.dangerSoft }]}>
             <Ionicons name="cloud-offline-outline" size={38} color={colors.danger} />
@@ -308,6 +339,14 @@ export default function KycScreen() {
 
   const status = result?.status ?? 'UNVERIFIED';
   const content = statusContent[status];
+  const roleDescription =
+    user?.role === 'CLIENT'
+      ? status === 'UNVERIFIED'
+        ? 'Complete a quick identity check to build trust when posting and managing tasks.'
+        : status === 'VERIFIED'
+          ? 'Your client account has passed TaskGrid identity verification.'
+          : content.description
+      : content.description;
   const toneColor = colors[content.tone];
   const toneSoft =
     content.tone === 'primary' ? colors.primarySoft : colors[`${content.tone}Soft` as const];
@@ -318,7 +357,11 @@ export default function KycScreen() {
 
   return (
     <Screen keyboard contentStyle={styles.screen}>
-      <AuthHeader title="Identity verification" subtitle="Powered securely by Dojah" />
+      <AuthHeader
+        title="Identity verification"
+        subtitle="Powered securely by Dojah"
+        onBackPress={leaveKyc}
+      />
 
       <AnimatedEntrance style={styles.hero}>
         <View style={[styles.heroIconRing, { backgroundColor: toneSoft }]}>
@@ -331,7 +374,7 @@ export default function KycScreen() {
             {content.title}
           </AppText>
           <AppText color={colors.textSecondary} style={styles.centerText}>
-            {content.description}
+            {roleDescription}
           </AppText>
         </View>
       </AnimatedEntrance>
@@ -399,7 +442,7 @@ export default function KycScreen() {
             </AppText>
           </Pressable>
 
-          <Pressable onPress={() => router.push('/(auth)/privacy-policy')}>
+          <Pressable onPress={() => router.push('/legal/privacy-policy' as never)}>
             <AppText variant="bodyMedium" color={colors.primary} style={styles.policyLink}>
               Read the Privacy Policy
             </AppText>
@@ -411,7 +454,7 @@ export default function KycScreen() {
             loading={launching}
           />
           <AppText variant="caption" color={colors.textMuted} style={styles.centerText}>
-            Use the test identity details provided for this verification.
+            Enter accurate identity details and complete the face check in good lighting.
           </AppText>
         </AnimatedEntrance>
       ) : null}
@@ -455,13 +498,24 @@ export default function KycScreen() {
             variant="secondary"
             onPress={refreshStatus}
           />
+          <Button
+            label="Restart verification"
+            icon="reload-outline"
+            variant="ghost"
+            onPress={() => setRestartPromptVisible(true)}
+            loading={restarting}
+          />
         </AnimatedEntrance>
       ) : null}
 
       {status === 'VERIFIED' ? (
         <AnimatedEntrance delay={80} style={styles.section}>
-          <NoticeCard tone="success" icon="checkmark-circle-outline" title="You’re ready to work">
-            Your verified badge can now be used as a trust signal on TaskGrid.
+          <NoticeCard
+            tone="success"
+            icon="checkmark-circle-outline"
+            title={user?.role === 'CLIENT' ? 'Your identity is confirmed' : 'You’re ready to work'}
+          >
+            Your verified status can now be used as a trust signal on TaskGrid.
           </NoticeCard>
           <SurfaceCard style={styles.detailsCard}>
             <AppText variant="subtitle">Verification details</AppText>
@@ -536,8 +590,8 @@ export default function KycScreen() {
               <Button
                 label="Try verification again"
                 icon="refresh-outline"
-                onPress={beginVerification}
-                loading={launching}
+                onPress={() => setRestartPromptVisible(true)}
+                loading={restarting}
               />
               <Button
                 label="Appeal this result"
@@ -581,10 +635,20 @@ export default function KycScreen() {
           <Button
             label="Open help and support"
             icon="help-circle-outline"
-            onPress={() => router.push('/(tabs)/profile/support')}
+            onPress={() => router.push('/support' as never)}
           />
         </AnimatedEntrance>
       ) : null}
+
+      <ConfirmationModal
+        visible={restartPromptVisible}
+        title="Restart identity verification?"
+        message="This closes the current attempt and creates a fresh Dojah reference. Use it when the existing check is stuck or failed before you could finish."
+        confirmLabel="Restart"
+        cancelLabel="Keep this attempt"
+        onCancel={() => setRestartPromptVisible(false)}
+        onConfirm={() => void restartVerification()}
+      />
     </Screen>
   );
 }

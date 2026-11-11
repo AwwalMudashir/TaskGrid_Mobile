@@ -1,6 +1,6 @@
 import { Link } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 
 import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
 import { AppText } from '@/src/components/ui/AppText';
@@ -10,7 +10,7 @@ import { Screen } from '@/src/components/ui/Screen';
 import { TextField } from '@/src/components/ui/TextField';
 import { useAuth } from '@/src/features/auth/AuthContext';
 import { ApiError } from '@/src/lib/api';
-import { isEmail } from '@/src/lib/validation';
+import { isEmail, stripTrailingPasswordWhitespace } from '@/src/lib/validation';
 import { spacing, useAppTheme } from '@/src/theme';
 
 export default function LoginScreen() {
@@ -22,12 +22,14 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   async function submit() {
+    const cleanPassword = stripTrailingPasswordWhitespace(password);
+    if (cleanPassword !== password) setPassword(cleanPassword);
     if (!isEmail(email)) return setError('Enter a valid email address.');
-    if (!password) return setError('Enter your password.');
+    if (!cleanPassword) return setError('Enter your password.');
     setLoading(true);
     setError('');
     try {
-      await signIn(email, password);
+      await signIn(email, cleanPassword);
     } catch (cause) {
       setError(
         cause instanceof ApiError
@@ -42,6 +44,12 @@ export default function LoginScreen() {
   return (
     <Screen keyboard contentStyle={styles.screen}>
       <AnimatedEntrance style={styles.hero}>
+        <Image
+          accessibilityLabel="TaskGrid logo"
+          resizeMode="contain"
+          source={require('../../assets/images/branding/taskgrid-mark.png')}
+          style={styles.brandMark}
+        />
         <AuthArtwork name="login" width={158} height={164} />
         <View style={styles.heroCopy}>
           <AppText variant="title" style={styles.centerText}>
@@ -73,6 +81,7 @@ export default function LoginScreen() {
           placeholder="Enter your password"
           value={password}
           onChangeText={setPassword}
+          onBlur={() => setPassword((current) => stripTrailingPasswordWhitespace(current))}
           secureTextEntry
           autoComplete="current-password"
           onSubmitEditing={submit}
@@ -106,6 +115,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   screen: { paddingTop: spacing.xxxl },
   hero: { alignItems: 'center', gap: spacing.sm },
+  brandMark: { width: 52, height: 52, marginBottom: spacing.xs },
   heroCopy: { alignItems: 'center', gap: spacing.sm },
   centerText: { textAlign: 'center' },
   form: { gap: spacing.lg, marginTop: spacing.xxl },

@@ -74,6 +74,8 @@ export type TaskBid = {
   recentReviews: WorkerReview[];
   priceAdjustmentReason: string | null;
   matchesPostedPrice: boolean;
+  matchPercentage: number;
+  matchExplanation: string | null;
 };
 
 export type WorkerReview = {
@@ -106,6 +108,19 @@ export type TaskImage = {
   createdAt: string;
 };
 
+export type EvidenceComparison = {
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'NOT_AVAILABLE' | 'FAILED';
+  visualAlignmentScore: number | null;
+  summary: string | null;
+  matchingObservations: string[];
+  differenceObservations: string[];
+  limitations: string[];
+  briefImageCount: number;
+  completionImageCount: number;
+  assessedAt: string | null;
+  advisoryOnly: true;
+};
+
 export type TaskDetail = TaskCard & {
   description: string;
   latitude: number | null;
@@ -121,6 +136,7 @@ export type TaskDetail = TaskCard & {
   completionImages: TaskImage[];
   enRouteAt: string | null;
   arrivedAt: string | null;
+  workerDepartedAt: string | null;
   arrivalDistanceMetres: number | null;
   arrivalVerificationMethod: 'GPS' | 'MANUAL' | null;
   manualArrivalReason: string | null;
@@ -141,6 +157,9 @@ export type TaskDetail = TaskCard & {
   maximumPriceAdjustmentPercent: number;
   minimumApplicationPrice: number;
   maximumApplicationPrice: number;
+  safetyWindowOpen: boolean;
+  conversationAvailable: boolean;
+  evidenceComparison: EvidenceComparison | null;
 };
 
 export type ReceivedReviewPage = {
@@ -197,6 +216,7 @@ export type TaskDispute = {
   createdAt: string;
   resolvedAt: string | null;
   history: DisputeHistory[];
+  evidenceComparison: EvidenceComparison | null;
 };
 
 export type DisputeHistory = {
@@ -583,6 +603,13 @@ export const taskApi = {
   stopSharing(id: string) {
     return apiRequest<WorkerLocation>(`/locations/tasks/${id}/stop-sharing`, {
       method: 'POST',
+      authenticated: true,
+    });
+  },
+  confirmDeparture(id: string, coordinates: Coordinates) {
+    return apiRequest<WorkerLocation>(`/locations/tasks/${id}/confirm-departure`, {
+      method: 'POST',
+      body: coordinates,
       authenticated: true,
     });
   },

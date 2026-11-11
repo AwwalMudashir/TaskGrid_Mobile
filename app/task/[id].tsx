@@ -40,6 +40,7 @@ import {
   emergencyContactApi,
   taskApi,
   type Coordinates,
+  type EvidenceComparison,
   type LifecycleReminder,
   type LifecycleReminderAction,
   type TaskBid,
@@ -62,7 +63,6 @@ const label = (value: string) =>
     .replace(/_/g, ' ')
     .replace(/^./, (letter) => letter.toUpperCase());
 const isOpen = (task: TaskDetail) => task.status === 'POSTED' || task.status === 'BID_RECEIVED';
-const closedTaskStatuses = new Set(['PAID', 'REFUNDED', 'CANCELLED']);
 type BusyAction =
   | 'brief-upload'
   | 'apply'
@@ -71,6 +71,7 @@ type BusyAction =
   | 'journey-start'
   | 'journey-arrive'
   | 'journey-stop'
+  | 'confirm-departure'
   | 'complete'
   | 'confirm'
   | 'review'
@@ -207,6 +208,7 @@ export default function TaskDetailScreen() {
   const [message, setMessage] = useState('');
   const [priceAdjustmentReason, setPriceAdjustmentReason] = useState('');
   const [selectedBid, setSelectedBid] = useState<TaskBid | null>(null);
+  const [showAllApplicants, setShowAllApplicants] = useState(false);
   const [journeyPromptVisible, setJourneyPromptVisible] = useState(false);
   const [journeyPromptDismissed, setJourneyPromptDismissed] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
@@ -227,11 +229,16 @@ export default function TaskDetailScreen() {
   const [cancellationDetails, setCancellationDetails] = useState('');
   const [reminderBusy, setReminderBusy] = useState(false);
   const handledReminderId = useRef<string | null>(null);
+  const evidenceComparisonPolls = useRef(0);
   const [briefPhotos, setBriefPhotos] = useState<LocalProfileImage[]>([]);
   const [completionPhotos, setCompletionPhotos] = useState<LocalProfileImage[]>([]);
   const [lastCoordinate, setLastCoordinate] = useState<Coordinates | null>(null);
   const [reviewClock, setReviewClock] = useState(Date.now());
   const busy = busyAction !== null;
+
+  useEffect(() => {
+    setShowAllApplicants(false);
+  }, [id]);
 
   const loadWorkerReadiness = useCallback(async () => {
     setKycVerified(null);
@@ -259,7 +266,10 @@ export default function TaskDetailScreen() {
         const next = await taskApi.detail(id, forceRefresh);
         setTask(next);
         if (next.status === 'CANCELLED') {
-          void taskApi.cancellation(id).then(setCancellation).catch(() => undefined);
+          void taskApi
+            .cancellation(id)
+            .then(setCancellation)
+            .catch(() => undefined);
         }
         if (user?.role === 'RUNNER' && isOpen(next)) {
           void loadWorkerReadiness();
@@ -283,6 +293,10 @@ export default function TaskDetailScreen() {
       void refresh();
     }, [refresh]),
   );
+
+  useEffect(() => {
+    evidenceComparisonPolls.current = 0;
+  }, [id]);
 
   const clearLifecycleReminderRoute = useCallback(() => {
     handledReminderId.current = null;
@@ -356,13 +370,31 @@ export default function TaskDetailScreen() {
 
   const isOwner = task?.clientId === user?.id;
   const isAssigned = task?.assignedRunnerId === user?.id;
-  const taskClosed = Boolean(task && closedTaskStatuses.has(task.status));
   const canUseTaskConversation = Boolean(
-    (isOwner || isAssigned) && task?.assignedRunnerId && !taskClosed,
+    (isOwner || isAssigned) && task?.assignedRunnerId && task.conversationAvailable,
   );
-  const canUseSos = Boolean(
-    (isOwner || isAssigned) && !taskClosed && task?.arrivedAt && task.status === 'ARRIVED',
+  const canUseSos = Boolean((isOwner || isAssigned) && task?.safetyWindowOpen);
+  const canConfirmDeparture = Boolean(
+    isAssigned && task?.status === 'DISPUTED' && task.safetyWindowOpen,
   );
+
+  useEffect(() => {
+    const comparisonWaiting = Boolean(
+      isOwner &&
+      task?.runnerCompletedAt &&
+      (task.briefImages?.length ?? 0) > 0 &&
+      (task.completionImages?.length ?? 0) > 0 &&
+      (!task.evidenceComparison ||
+        task.evidenceComparison.status === 'PENDING' ||
+        task.evidenceComparison.status === 'PROCESSING'),
+    );
+    if (!comparisonWaiting || evidenceComparisonPolls.current >= 12) return;
+    const timer = setTimeout(() => {
+      evidenceComparisonPolls.current += 1;
+      void refresh(true, true);
+    }, 4_000);
+    return () => clearTimeout(timer);
+  }, [isOwner, refresh, task]);
   const myBid = task?.bids.find((bid) => bid.runnerId === user?.id);
   const parsedProposedPrice = Number(proposedPrice);
   const matchesBudget = Boolean(
@@ -374,16 +406,16 @@ export default function TaskDetailScreen() {
   const maximumApplicationPrice = task?.maximumApplicationPrice ?? null;
   const priceWithinRange = Boolean(
     minimumApplicationPrice != null &&
-      maximumApplicationPrice != null &&
-      parsedProposedPrice >= minimumApplicationPrice &&
-      parsedProposedPrice <= maximumApplicationPrice,
+    maximumApplicationPrice != null &&
+    parsedProposedPrice >= minimumApplicationPrice &&
+    parsedProposedPrice <= maximumApplicationPrice,
   );
   const needsPriceReason = Boolean(proposedPrice.trim() && !matchesBudget);
   const validPrice = Boolean(
     /^\d+(?:\.\d{1,2})?$/.test(proposedPrice.trim()) &&
-      parsedProposedPrice > 0 &&
-      priceWithinRange &&
-      (!needsPriceReason || priceAdjustmentReason.trim().length >= 10),
+    parsedProposedPrice > 0 &&
+    priceWithinRange &&
+    (!needsPriceReason || priceAdjustmentReason.trim().length >= 10),
   );
   const paymentCopy = task ? paymentWording(task, Boolean(isOwner), Boolean(isAssigned)) : null;
   const paymentSecured = Boolean(
@@ -412,9 +444,9 @@ export default function TaskDetailScreen() {
   );
   const canCancelTask = Boolean(
     isOwner &&
-      task &&
-      !task.disputeStatus &&
-      ['POSTED', 'BID_RECEIVED', 'ACCEPTED', 'IN_PROGRESS', 'EN_ROUTE'].includes(task.status),
+    task &&
+    !task.disputeStatus &&
+    ['POSTED', 'BID_RECEIVED', 'ACCEPTED', 'IN_PROGRESS', 'EN_ROUTE'].includes(task.status),
   );
   const reviewCountdown = task
     ? reviewTimeRemaining(task.completionReviewDeadlineAt, reviewClock)
@@ -572,6 +604,29 @@ export default function TaskDetailScreen() {
         cause instanceof ApiError
           ? cause.message
           : "We couldn't record your arrival. Contact the client directly.",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function confirmDeparture() {
+    if (!task || busy) return;
+    setBusyAction('confirm-departure');
+    setError('');
+    try {
+      const coordinates = await currentCoordinates();
+      await taskApi.confirmDeparture(task.id, coordinates);
+      await refresh(false, true);
+      Alert.alert(
+        'Departure confirmed',
+        'The onsite safety window is now closed. This task conversation has been removed from both inboxes.',
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError || cause instanceof Error
+          ? cause.message
+          : "We couldn't confirm that you have left the task location.",
       );
     } finally {
       setBusyAction(null);
@@ -1006,6 +1061,24 @@ export default function TaskDetailScreen() {
                   </AppText>
                 </Pressable>
               ) : null}
+            </AnimatedEntrance>
+          ) : null}
+          {canConfirmDeparture ? (
+            <AnimatedEntrance delay={48} style={styles.departurePrompt}>
+              <View style={styles.departurePromptCopy}>
+                <AppText variant="subtitle">Have you left the task location?</AppText>
+                <AppText color={colors.textSecondary} style={styles.privacyCopy}>
+                  Once you are safely away, confirm your departure with a one-time location check.
+                  SOS and task chat remain available until then.
+                </AppText>
+              </View>
+              <Button
+                label="Confirm I've left"
+                variant="secondary"
+                icon="walk-outline"
+                loading={busyAction === 'confirm-departure'}
+                onPress={() => void confirmDeparture()}
+              />
             </AnimatedEntrance>
           ) : null}
           {journeyStartRequired || journeyResumeRequired ? (
@@ -1492,7 +1565,7 @@ export default function TaskDetailScreen() {
             <AnimatedEntrance delay={100}>
               <View style={[styles.reviewExperience, { borderLeftColor: colors.warning }]}>
                 <AppText variant="eyebrow" color={colors.warning}>
-                  {isOwner ? 'Your review window' : 'Client review in progress'}
+                  {isOwner ? 'Time before automatic payment release' : 'Automatic earnings release'}
                 </AppText>
                 <AppText variant="display" style={styles.reviewCountdown}>
                   {reviewCountdown}
@@ -1500,11 +1573,11 @@ export default function TaskDetailScreen() {
                 <AppText color={colors.textSecondary} style={styles.reviewLead}>
                   {isOwner
                     ? reviewExpired
-                      ? 'The review window has closed. Automatic payment release is being processed.'
-                      : `${task.assignedRunnerName ?? 'The worker'} has submitted completion evidence. Approve the work or open a dispute before this timer ends.`
+                      ? `The review time has ended. TaskGrid is processing the automatic payment release to ${task.assignedRunnerName ?? 'the worker'}.`
+                      : `${task.assignedRunnerName ?? 'The worker'} submitted completion photos. This timer shows how long you have to approve the work or open a dispute. If you take no action, TaskGrid will automatically release the protected payment to the worker.`
                     : reviewExpired
-                      ? 'The review window has closed. Your earnings will become available after automatic release is processed.'
-                      : `${task.clientName} can now review your evidence. Your earnings remain protected and will release automatically if no dispute is opened.`}
+                      ? 'The client review time has ended. TaskGrid is processing the automatic release into your available wallet balance.'
+                      : `${task.clientName} is reviewing your completion photos. If the client does not approve the work or open a dispute before this timer reaches zero, TaskGrid will automatically move the protected earnings into your available wallet balance.`}
                 </AppText>
 
                 <View style={[styles.reviewRule, { backgroundColor: colors.divider }]} />
@@ -1526,7 +1599,7 @@ export default function TaskDetailScreen() {
                   </View>
                   <View style={styles.reviewDateColumn}>
                     <AppText variant="caption" color={colors.textMuted}>
-                      Review closes
+                      {isOwner ? 'Payment auto-releases' : 'Earnings auto-release'}
                     </AppText>
                     <AppText variant="bodyMedium">
                       {new Date(task.completionReviewDeadlineAt!).toLocaleString('en-NG', {
@@ -1540,8 +1613,8 @@ export default function TaskDetailScreen() {
                 </View>
                 <AppText variant="caption" color={colors.textMuted}>
                   {isOwner
-                    ? 'Approving releases the payment immediately. Opening a dispute freezes it for TaskGrid review.'
-                    : 'Released earnings appear in your wallet. A dispute freezes the payment until TaskGrid records a decision.'}
+                    ? 'Approve to release the payment now. Open a dispute before the deadline if the submitted work needs TaskGrid review.'
+                    : 'A client approval can release the earnings sooner. An opened dispute pauses automatic release until TaskGrid records a decision.'}
                 </AppText>
               </View>
             </AnimatedEntrance>
@@ -1551,9 +1624,35 @@ export default function TaskDetailScreen() {
             <TaskImageGallery title="Finished work" images={task.completionImages} />
           ) : null}
 
+          {isOwner && task.runnerCompletedAt && (task.briefImages?.length ?? 0) > 0 ? (
+            <CompletionEvidenceComparisonView comparison={task.evidenceComparison} />
+          ) : null}
+
           {isOwner && isOpen(task) ? (
             <View style={styles.section}>
-              <AppText variant="subtitle">Applications ({task.bids.length})</AppText>
+              <View style={styles.applicationHeader}>
+                <View style={styles.applicationHeadingCopy}>
+                  <AppText variant="subtitle">Applications ({task.bids.length})</AppText>
+                  {task.bids.length > 0 ? (
+                    <AppText variant="caption" color={colors.textMuted}>
+                      Ranked by task fit. You still make the final choice.
+                    </AppText>
+                  ) : null}
+                </View>
+                {task.bids.length > 5 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={showAllApplicants ? 'Show the top five applicants' : 'See all applicants'}
+                    hitSlop={10}
+                    onPress={() => setShowAllApplicants((current) => !current)}
+                    style={({ pressed }) => [styles.seeAllApplicants, { opacity: pressed ? 0.55 : 1 }]}
+                  >
+                    <AppText variant="bodyMedium" color={colors.primary}>
+                      {showAllApplicants ? 'Show top 5' : 'See all'}
+                    </AppText>
+                  </Pressable>
+                ) : null}
+              </View>
               {task.bids.length === 0 ? (
                 <SurfaceCard>
                   <AppText color={colors.textMuted}>
@@ -1561,7 +1660,7 @@ export default function TaskDetailScreen() {
                   </AppText>
                 </SurfaceCard>
               ) : (
-                task.bids.map((bid, index) => (
+                (showAllApplicants ? task.bids : task.bids.slice(0, 5)).map((bid, index, visibleBids) => (
                   <Pressable
                     key={bid.id}
                     accessibilityRole="button"
@@ -1573,7 +1672,7 @@ export default function TaskDetailScreen() {
                         borderBottomColor: colors.divider,
                         opacity: pressed ? 0.72 : 1,
                         borderBottomWidth:
-                          index === task.bids.length - 1 ? 0 : StyleSheet.hairlineWidth,
+                          index === visibleBids.length - 1 ? 0 : StyleSheet.hairlineWidth,
                       },
                     ]}
                   >
@@ -1590,7 +1689,14 @@ export default function TaskDetailScreen() {
                       )}
                     </View>
                     <View style={styles.bidSummary}>
-                      <AppText variant="bodyMedium">{bid.runnerName}</AppText>
+                      <View style={styles.bidNameRow}>
+                        <AppText variant="bodyMedium" numberOfLines={1} style={styles.bidName}>
+                          {bid.runnerName}
+                        </AppText>
+                        <AppText variant="caption" color={colors.primary} style={styles.matchLabel}>
+                          {bid.matchPercentage ?? 0}% match
+                        </AppText>
+                      </View>
                       <View style={styles.inlineMeta}>
                         <Ionicons name="star" size={14} color={colors.warning} />
                         <AppText variant="caption" color={colors.textSecondary}>
@@ -1653,7 +1759,7 @@ export default function TaskDetailScreen() {
                   <Button
                     label="Go to verification"
                     variant="secondary"
-                    onPress={() => router.push('/(tabs)/profile/kyc')}
+                    onPress={() => router.push('/identity-verification' as never)}
                   />
                 </SurfaceCard>
               ) : !contactReady ? (
@@ -1701,7 +1807,8 @@ export default function TaskDetailScreen() {
                   />
                   {minimumApplicationPrice != null && maximumApplicationPrice != null ? (
                     <AppText variant="caption" color={colors.textMuted}>
-                      Allowed range {money(minimumApplicationPrice)} to {money(maximumApplicationPrice)}
+                      Allowed range {money(minimumApplicationPrice)} to{' '}
+                      {money(maximumApplicationPrice)}
                     </AppText>
                   ) : null}
                   {needsPriceReason ? (
@@ -2100,6 +2207,11 @@ export default function TaskDetailScreen() {
                 <AppText variant="title" style={styles.applicantName}>
                   {selectedBid?.runnerName}
                 </AppText>
+                <View style={[styles.applicantMatch, { backgroundColor: colors.primarySoft }]}>
+                  <AppText variant="bodyMedium" color={colors.primary}>
+                    {selectedBid?.matchPercentage ?? 0}% task match
+                  </AppText>
+                </View>
                 <AppText color={colors.textSecondary}>
                   {selectedBid?.primarySkill ?? 'TaskGrid worker'}
                 </AppText>
@@ -2116,6 +2228,20 @@ export default function TaskDetailScreen() {
                   job quality.
                 </AppText>
               </View>
+
+              {selectedBid?.matchExplanation ? (
+                <View style={styles.editorialSection}>
+                  <AppText variant="eyebrow" color={colors.primary}>
+                    Why this match
+                  </AppText>
+                  <AppText color={colors.textSecondary}>
+                    {selectedBid.matchExplanation}
+                  </AppText>
+                  <AppText variant="caption" color={colors.textMuted}>
+                    This score supports comparison only. TaskGrid does not choose a worker for you.
+                  </AppText>
+                </View>
+              ) : null}
 
               <View style={[styles.trustStrip, { borderColor: colors.divider }]}>
                 <View style={styles.trustMetric}>
@@ -2686,6 +2812,123 @@ function TaskImageGallery({ title, images }: { title: string; images: TaskImage[
   );
 }
 
+function CompletionEvidenceComparisonView({
+  comparison,
+}: {
+  comparison: EvidenceComparison | null;
+}) {
+  const { colors } = useAppTheme();
+  const completed = comparison?.status === 'COMPLETED' && comparison.visualAlignmentScore != null;
+  const score = comparison?.visualAlignmentScore ?? 0;
+
+  return (
+    <AnimatedEntrance delay={140}>
+      <View style={[styles.evidenceComparison, { borderColor: colors.divider }]}>
+        <View style={styles.evidenceComparisonHeading}>
+          <View style={styles.evidenceComparisonHeadingCopy}>
+            <AppText variant="eyebrow" color={colors.primary}>
+              PHOTO CROSS-CHECK
+            </AppText>
+            <AppText variant="subtitle">A second view of the evidence</AppText>
+          </View>
+          <Ionicons name="scan-outline" size={25} color={colors.primary} />
+        </View>
+
+        {completed ? (
+          <>
+            <View style={styles.evidenceScoreRow}>
+              <AppText style={styles.evidenceScore} color={colors.primary}>
+                {Math.round(score)}%
+              </AppText>
+              <View style={styles.evidenceMeterCopy}>
+                <AppText variant="caption" color={colors.textMuted}>
+                  Visual alignment
+                </AppText>
+                <View style={[styles.evidenceMeter, { backgroundColor: colors.surfaceSecondary }]}>
+                  <View
+                    style={[
+                      styles.evidenceMeterFill,
+                      {
+                        backgroundColor: colors.primary,
+                        width: `${score}%`,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            </View>
+            <AppText color={colors.textSecondary} style={styles.evidenceSummary}>
+              {comparison.summary}
+            </AppText>
+            <EvidenceObservationList
+              title="What looks related"
+              items={comparison.matchingObservations}
+              color={colors.success}
+            />
+            <EvidenceObservationList
+              title="Visible differences"
+              items={comparison.differenceObservations}
+              color={colors.warning}
+            />
+            {comparison.limitations.length ? (
+              <EvidenceObservationList
+                title="What the comparison could not confirm"
+                items={comparison.limitations}
+                color={colors.textMuted}
+              />
+            ) : null}
+          </>
+        ) : (
+          <View style={styles.evidencePending}>
+            <AppText variant="bodyMedium">
+              {comparison?.status === 'NOT_AVAILABLE'
+                ? 'Comparison not available'
+                : comparison?.status === 'FAILED'
+                  ? 'Comparison could not be completed'
+                  : 'Comparing the photos'}
+            </AppText>
+            <AppText color={colors.textSecondary}>
+              {comparison?.summary ||
+                'TaskGrid is reviewing the original and completed-work photos. This may take a moment.'}
+            </AppText>
+          </View>
+        )}
+
+        <AppText variant="caption" color={colors.textMuted} style={styles.evidenceDisclaimer}>
+          This is an advisory visual comparison, not proof that work was completed. Use the photos
+          and your own judgement before approving or opening a dispute.
+        </AppText>
+      </View>
+    </AnimatedEntrance>
+  );
+}
+
+function EvidenceObservationList({
+  title,
+  items,
+  color,
+}: {
+  title: string;
+  items: string[];
+  color: string;
+}) {
+  const { colors } = useAppTheme();
+  if (!items.length) return null;
+  return (
+    <View style={styles.evidenceObservationGroup}>
+      <AppText variant="bodyMedium">{title}</AppText>
+      {items.map((item, index) => (
+        <View key={`${index}-${item}`} style={styles.evidenceObservation}>
+          <View style={[styles.evidenceObservationDot, { backgroundColor: color }]} />
+          <AppText color={colors.textSecondary} style={styles.evidenceObservationText}>
+            {item}
+          </AppText>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { gap: spacing.lg, paddingBottom: spacing.xxxl },
   hero: {
@@ -2916,6 +3159,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 2,
   },
+  departurePrompt: {
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  departurePromptCopy: { gap: spacing.xs },
   privacyCopy: { lineHeight: 19 },
   manualArrivalNotice: {
     gap: spacing.xs,
@@ -3029,6 +3278,14 @@ const styles = StyleSheet.create({
   },
   cancellationAmountItem: { flex: 1, gap: 3 },
   section: { gap: spacing.md },
+  applicationHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  applicationHeadingCopy: { flex: 1, gap: 3 },
+  seeAllApplicants: { paddingVertical: 2, paddingLeft: spacing.md },
   bidCard: { gap: spacing.md },
   bidRow: {
     minHeight: 84,
@@ -3047,6 +3304,9 @@ const styles = StyleSheet.create({
   },
   bidAvatarImage: { width: '100%', height: '100%' },
   bidSummary: { flex: 1, gap: 4 },
+  bidNameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  bidName: { flexShrink: 1 },
+  matchLabel: { flexShrink: 0 },
   inlineMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   bidPrice: { alignItems: 'flex-end', gap: spacing.xs },
   form: { gap: spacing.lg },
@@ -3067,6 +3327,37 @@ const styles = StyleSheet.create({
   },
   gallery: { gap: spacing.sm, paddingRight: spacing.lg },
   taskImage: { width: 148, height: 116, borderRadius: radius.lg },
+  evidenceComparison: {
+    gap: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.xs,
+  },
+  evidenceComparisonHeading: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.lg,
+  },
+  evidenceComparisonHeadingCopy: { flex: 1, gap: 3 },
+  evidenceScoreRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.lg },
+  evidenceScore: { fontSize: 44, lineHeight: 49, fontWeight: '700', letterSpacing: -2 },
+  evidenceMeterCopy: { flex: 1, gap: spacing.sm, paddingBottom: 7 },
+  evidenceMeter: { height: 7, borderRadius: 4, overflow: 'hidden' },
+  evidenceMeterFill: { height: '100%', borderRadius: 4 },
+  evidenceSummary: { lineHeight: 23 },
+  evidencePending: { gap: spacing.xs },
+  evidenceObservationGroup: { gap: spacing.sm },
+  evidenceObservation: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  evidenceObservationDot: { width: 7, height: 7, borderRadius: 4, marginTop: 7 },
+  evidenceObservationText: { flex: 1, lineHeight: 21 },
+  evidenceDisclaimer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(128,128,128,0.24)',
+    paddingTop: spacing.md,
+    lineHeight: 18,
+  },
   modalKeyboard: { flex: 1 },
   overlay: {
     flex: 1,
@@ -3263,6 +3554,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   applicantName: { textAlign: 'center' },
+  applicantMatch: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    marginTop: spacing.xs,
+  },
   identitySignal: {
     flexDirection: 'row',
     alignItems: 'center',

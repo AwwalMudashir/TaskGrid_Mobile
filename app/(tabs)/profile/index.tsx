@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { AnimatedEntrance } from '@/src/components/ui/AnimatedEntrance';
@@ -11,10 +11,12 @@ import { Screen } from '@/src/components/ui/Screen';
 import { SettingsRow } from '@/src/components/ui/SettingsRow';
 import { SurfaceCard } from '@/src/components/ui/SurfaceCard';
 import { useAuth } from '@/src/features/auth/AuthContext';
+import type { KycStatus } from '@/src/features/kyc/types';
 import {
   arePushNotificationsEnabled,
   setPushNotificationsEnabled,
 } from '@/src/features/notifications/push-notifications';
+import { kycApi } from '@/src/lib/api';
 import { radius, shadows, spacing, useAppTheme } from '@/src/theme';
 
 export default function ProfileScreen() {
@@ -24,6 +26,7 @@ export default function ProfileScreen() {
   const [signingOut, setSigningOut] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [savingNotifications, setSavingNotifications] = useState(false);
+  const [identityStatus, setIdentityStatus] = useState<KycStatus | null>(null);
   const role =
     user?.role === 'RUNNER' ? 'Worker' : user?.role === 'CLIENT' ? 'Client' : 'Administrator';
   const initial = user?.fullName.charAt(0).toUpperCase() || '?';
@@ -52,6 +55,22 @@ export default function ProfileScreen() {
       .then(setNotificationsEnabled)
       .catch(() => undefined);
   }, []);
+
+  const refreshIdentityStatus = useCallback(async () => {
+    try {
+      const result = await kycApi.status();
+      setIdentityStatus(result.status);
+    } catch (cause) {
+      // Keep the last confirmed status during temporary network failures.
+      console.warn('[TaskGrid profile] Identity status could not be refreshed', cause);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshIdentityStatus();
+    }, [refreshIdentityStatus]),
+  );
 
   async function updateNotifications(enabled: boolean) {
     if (savingNotifications) return;
@@ -99,7 +118,9 @@ export default function ProfileScreen() {
         </View>
         <Pressable
           accessibilityLabel="Refresh profile"
-          onPress={() => reloadProfile().catch(() => undefined)}
+          onPress={() => {
+            void Promise.allSettled([reloadProfile(), refreshIdentityStatus()]);
+          }}
           style={[styles.refresh, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
           <Ionicons name="refresh" size={20} color={colors.primary} />
@@ -126,26 +147,22 @@ export default function ProfileScreen() {
                   {role}
                 </AppText>
               </View>
-              <View
-                style={[
-                  styles.badge,
-                  {
-                    backgroundColor: user?.emailVerified ? colors.successSoft : colors.warningSoft,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={user?.emailVerified ? 'checkmark-circle' : 'alert-circle'}
-                  size={14}
-                  color={user?.emailVerified ? colors.success : colors.warning}
-                />
-                <AppText
-                  variant="caption"
-                  color={user?.emailVerified ? colors.success : colors.warning}
-                >
-                  {user?.emailVerified ? 'Verified' : 'Unverified'}
-                </AppText>
-              </View>
+              {identityStatus === 'VERIFIED' ? (
+                <View style={[styles.badge, { backgroundColor: colors.successSoft }]}>
+                  <Ionicons name="shield-checkmark" size={14} color={colors.success} />
+                  <AppText variant="caption" color={colors.success}>
+                    Identity verified
+                  </AppText>
+                </View>
+              ) : null}
+              {identityStatus === 'PENDING' || identityStatus === 'APPEALING' ? (
+                <View style={[styles.badge, { backgroundColor: colors.warningSoft }]}>
+                  <Ionicons name="time-outline" size={14} color={colors.warning} />
+                  <AppText variant="caption" color={colors.warning}>
+                    Identity pending
+                  </AppText>
+                </View>
+              ) : null}
             </View>
           </View>
         </SurfaceCard>
@@ -186,12 +203,6 @@ export default function ProfileScreen() {
               onPress={() => router.push('/(tabs)/profile/recommendations' as never)}
             />
             <SettingsRow
-              icon="shield-checkmark-outline"
-              title="Identity verification"
-              subtitle="Check, complete or appeal your KYC status"
-              onPress={() => router.push('/(tabs)/profile/kyc')}
-            />
-            <SettingsRow
               icon="business-outline"
               title="Payout bank"
               subtitle="Add or change the account for future earnings"
@@ -199,6 +210,12 @@ export default function ProfileScreen() {
             />
           </>
         ) : null}
+        <SettingsRow
+          icon="shield-checkmark-outline"
+          title="Identity verification"
+          subtitle="Check, complete or appeal your KYC status"
+          onPress={() => router.push('/identity-verification' as never)}
+        />
       </AnimatedEntrance>
 
       <AnimatedEntrance delay={190} style={styles.section}>

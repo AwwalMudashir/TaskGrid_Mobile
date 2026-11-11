@@ -53,7 +53,7 @@ export function RecommendedTasks() {
           title="No close matches yet"
           description="No open task currently meets your match level. You can review it from Profile."
           action={
-            <Pressable onPress={() => router.push('/(tabs)/profile/recommendations' as never)}>
+            <Pressable onPress={() => router.push('/task-recommendations' as never)}>
               <AppText variant="button" color={colors.primary}>
                 Review match level
               </AppText>

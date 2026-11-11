@@ -205,7 +205,7 @@ export default function PayoutAccountScreen() {
                 </AppText>
                 <Button
                   label="Open verification"
-                  onPress={() => router.push('/(tabs)/profile/kyc')}
+                  onPress={() => router.push('/identity-verification' as never)}
                 />
               </SurfaceCard>
             </AnimatedEntrance>

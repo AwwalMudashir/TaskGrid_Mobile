@@ -69,10 +69,7 @@ export default function RecommendationPreferencesScreen() {
 
   return (
     <Screen contentStyle={styles.screen}>
-      <AuthHeader
-        title="Task recommendations"
-        subtitle="Control how closely open tasks should match you"
-      />
+      <AuthHeader title="Task recommendations" />
 
       {loading ? (
         <View style={styles.loading}>
@@ -152,14 +149,6 @@ export default function RecommendationPreferencesScreen() {
             </View>
           </View>
 
-          <View style={[styles.note, { borderTopColor: colors.divider }]}>
-            <AppText variant="bodyMedium">What your setting changes</AppText>
-            <AppText color={colors.textSecondary}>
-              The match level filters tasks before AI ordering. Groq can reorder qualified tasks, but
-              it cannot add a task below your level or change its percentage. The minimum is 65%.
-            </AppText>
-          </View>
-
           <Button
             label={selected === preference.minimumScore ? 'Match level saved' : 'Save match level'}
             onPress={save}
@@ -199,5 +188,4 @@ const styles = StyleSheet.create({
   parts: { gap: spacing.lg, paddingTop: spacing.md },
   part: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   partCopy: { flex: 1, gap: 2 },
-  note: { gap: spacing.sm, borderTopWidth: 1, paddingTop: spacing.xl },
 });

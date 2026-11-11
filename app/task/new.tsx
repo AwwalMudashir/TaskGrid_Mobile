@@ -23,8 +23,15 @@ import {
   type TaskAssistantDraft,
   type TaskPriceSuggestion,
 } from '@/src/features/tasks/task-api';
-import { ApiError, skillsApi } from '@/src/lib/api';
+import { ApiError, kycApi, skillsApi } from '@/src/lib/api';
 import { radius, spacing, useAppTheme } from '@/src/theme';
+
+function skillIcon(skill: Skill | null | undefined): keyof typeof Ionicons.glyphMap {
+  const icon = skill?.iconName;
+  return icon && icon in Ionicons.glyphMap
+    ? (icon as keyof typeof Ionicons.glyphMap)
+    : 'construct-outline';
+}
 
 export default function NewTaskScreen() {
   const router = useRouter();
@@ -33,6 +40,9 @@ export default function NewTaskScreen() {
   const { colors } = useAppTheme();
   const [contact, setContact] = useState<EmergencyContact | null>(null);
   const [contactState, setContactState] = useState<'checking' | 'present' | 'missing' | 'error'>(
+    'checking',
+  );
+  const [kycState, setKycState] = useState<'checking' | 'verified' | 'required' | 'error'>(
     'checking',
   );
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -68,6 +78,7 @@ export default function NewTaskScreen() {
     useCallback(() => {
       let active = true;
       setContactState('checking');
+      setKycState('checking');
       void Promise.all([emergencyContactApi.current(), skillsApi.list()])
         .then(([saved, available]) => {
           if (active) {
@@ -85,6 +96,14 @@ export default function NewTaskScreen() {
                 : "We couldn't prepare this form. Try again.",
             );
           }
+        });
+      void kycApi
+        .status()
+        .then((status) => {
+          if (active) setKycState(status.status === 'VERIFIED' ? 'verified' : 'required');
+        })
+        .catch(() => {
+          if (active) setKycState('error');
         });
       return () => {
         active = false;
@@ -125,7 +144,13 @@ export default function NewTaskScreen() {
   const parsedBudget = Number(budget);
   const validBudget = /^\d+(?:\.\d{1,2})?$/.test(budget.trim()) && parsedBudget > 0;
   const canPost = Boolean(
-    title.trim() && description.trim() && skillId && position && contact && validBudget,
+    title.trim() &&
+      description.trim() &&
+      skillId &&
+      position &&
+      contact &&
+      kycState === 'verified' &&
+      validBudget,
   );
 
   async function post() {
@@ -246,6 +271,54 @@ export default function NewTaskScreen() {
                 Add now
               </AppText>
               <Ionicons name="arrow-forward" size={17} color={colors.warning} />
+            </Pressable>
+          </View>
+        </AnimatedEntrance>
+      ) : null}
+
+      {kycState === 'required' ? (
+        <AnimatedEntrance>
+          <View style={[styles.kycNotice, { backgroundColor: colors.warningSoft }]}>
+            <View style={[styles.kycNoticeIcon, { backgroundColor: colors.surface }]}>
+              <Ionicons name="shield-checkmark-outline" size={21} color={colors.warning} />
+            </View>
+            <View style={styles.kycNoticeCopy}>
+              <AppText variant="bodyMedium">Identity check required</AppText>
+              <AppText variant="caption" color={colors.textSecondary}>
+                Verify once to publish this task.
+              </AppText>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/identity-verification' as never)}
+              style={styles.kycNoticeAction}
+            >
+              <Ionicons name="chevron-forward" size={20} color={colors.warning} />
+            </Pressable>
+          </View>
+        </AnimatedEntrance>
+      ) : null}
+
+      {kycState === 'error' ? (
+        <AnimatedEntrance>
+          <View style={[styles.safetyNotice, { backgroundColor: colors.warningSoft }]}>
+            <View style={styles.safetyCopy}>
+              <AppText variant="bodyMedium" color={colors.warning}>
+                Identity status could not be checked
+              </AppText>
+              <AppText variant="caption" color={colors.textSecondary}>
+                This does not mean you are unverified. Open verification and try the status check again.
+              </AppText>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/identity-verification' as never)}
+              style={styles.safetyAction}
+            >
+              <AppText variant="button" color={colors.warning}>
+                Try again
+              </AppText>
+              <Ionicons name="refresh" size={17} color={colors.warning} />
             </Pressable>
           </View>
         </AnimatedEntrance>
@@ -375,18 +448,27 @@ export default function NewTaskScreen() {
                 },
               ]}
             >
-              <View style={styles.selectorCopy}>
-                <AppText
-                  variant={selectedSkill ? 'bodyMedium' : 'body'}
-                  color={selectedSkill ? colors.text : colors.textMuted}
-                >
-                  {selectedSkill?.name ?? 'Choose the closest match'}
-                </AppText>
-                {selectedSkill ? (
-                  <AppText variant="caption" color={colors.primary}>
-                    Selected
+              <View style={styles.selectorIdentity}>
+                <View style={[styles.selectorIcon, { backgroundColor: colors.surface }]}>
+                  <Ionicons
+                    name={skillIcon(selectedSkill)}
+                    size={21}
+                    color={selectedSkill ? colors.primary : colors.textMuted}
+                  />
+                </View>
+                <View style={styles.selectorCopy}>
+                  <AppText
+                    variant={selectedSkill ? 'bodyMedium' : 'body'}
+                    color={selectedSkill ? colors.text : colors.textMuted}
+                  >
+                    {selectedSkill?.name ?? 'Choose the closest match'}
                   </AppText>
-                ) : null}
+                  {selectedSkill ? (
+                    <AppText variant="caption" color={colors.primary}>
+                      Selected
+                    </AppText>
+                  ) : null}
+                </View>
               </View>
               <View style={[styles.selectorArrow, { backgroundColor: colors.surface }]}>
                 <Ionicons name="chevron-forward" size={18} color={colors.primary} />
@@ -635,6 +717,21 @@ export default function NewTaskScreen() {
                     },
                   ]}
                 >
+                  <View
+                    style={[
+                      styles.skillChoiceIcon,
+                      {
+                        backgroundColor:
+                          skill.id === skillId ? colors.surface : colors.background,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={skillIcon(skill)}
+                      size={22}
+                      color={skill.id === skillId ? colors.primary : colors.textSecondary}
+                    />
+                  </View>
                   <AppText
                     variant="bodyMedium"
                     color={skill.id === skillId ? colors.primary : colors.text}
@@ -688,6 +785,28 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   safetyCopy: { flex: 1, gap: 2 },
+  kycNotice: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+  },
+  kycNoticeIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kycNoticeCopy: { flex: 1, gap: 2 },
+  kycNoticeAction: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   safetyAction: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -738,6 +857,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   selectorCopy: { flex: 1, gap: 3 },
+  selectorIdentity: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  selectorIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   selectorArrow: {
     width: 36,
     height: 36,
@@ -861,10 +988,18 @@ const styles = StyleSheet.create({
   },
   skillChoice: {
     width: '48%',
-    minHeight: 76,
+    minHeight: 112,
     borderRadius: radius.md,
     padding: spacing.md,
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  skillChoiceIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   skillSelected: { position: 'absolute', right: spacing.sm, top: spacing.sm },
 });

@@ -9,7 +9,7 @@
     "@maplibre/maplibre-react-native": "^11.3.10",
     "@react-native-community/datetimepicker": "9.1.0",
     "@stomp/stompjs": "^7.3.0",
-    "dojah-kyc-sdk-react-expo": "0.1.22",
+    "dojah-kyc-sdk-react-expo": "0.1.23",
     "expo": "~57.0.20",
     "expo-blur": "~57.0.2",
     "expo-build-properties": "~57.0.17",

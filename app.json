@@ -21,10 +21,10 @@
     "android": {
       "package": "com.taskgrid.mobile",
       "softwareKeyboardLayoutMode": "resize",
+      "permissions": ["android.permission.CAMERA"],
       "adaptiveIcon": {
         "backgroundColor": "#10233F",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
@@ -52,8 +52,8 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/android-icon-monochrome.png",
-          "color": "#635BFF",
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#5557E8",
           "defaultChannel": "task-updates"
         }
       ],
@@ -65,7 +65,7 @@
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true,
-          "androidForegroundServiceIcon": "./assets/images/android-icon-monochrome.png"
+          "androidForegroundServiceIcon": "./assets/images/notification-icon.png"
         }
       ],
       [
@@ -76,7 +76,22 @@
           "microphonePermission": "TaskGrid may use your microphone during secure identity verification."
         }
       ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow TaskGrid to use the microphone for voice tasks and identity verification.",
+          "speechRecognitionPermission": "Allow TaskGrid to turn your spoken task into editable text.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.as",
+            "com.google.android.tts",
+            "com.samsung.android.bixby.agent"
+          ]
+        }
+      ],
       "./plugins/withAndroidBuildMemory",
+      "./plugins/withAllowScreenSharing",
+      "./plugins/withAndroidDesugaring",
       "dojah-kyc-sdk-react-expo",
       [
         "expo-build-properties",

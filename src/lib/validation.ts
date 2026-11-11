@@ -4,6 +4,12 @@ export const isPhone = (value: string) => /^\+?\d{10,15}$/.test(value.replace(/[
 
 export const normalisePhone = (value: string) => value.replace(/[\s()-]/g, '');
 
+/**
+ * Preserve intentional characters at the start or inside a password while removing
+ * whitespace commonly added accidentally after the final character on mobile keyboards.
+ */
+export const stripTrailingPasswordWhitespace = (value: string) => value.trimEnd();
+
 export function normaliseNigerianPhone(value: string) {
   const phone = normalisePhone(value);
   if (phone.startsWith('+234')) return phone;
