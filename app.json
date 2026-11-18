@@ -118,7 +118,8 @@
           }
         }
       ],
-      "./plugins/withAndroidKotlinCompiler"
+      "./plugins/withAndroidKotlinCompiler",
+      "./plugins/withDojahAndroidSdkVersion"
     ],
     "experiments": {
       "typedRoutes": true
