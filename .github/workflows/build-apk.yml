@@ -43,6 +43,22 @@ jobs:
       - name: Allow Gradle execution
         run: chmod +x android/gradlew
 
+      - name: Verify supported Dojah Android SDK
+        working-directory: android
+        run: |
+          ./gradlew :app:dependencyInsight --dependency sdk-kotlin --configuration releaseRuntimeClasspath --no-daemon | tee dojah-dependency.txt
+          grep -q "com.github.dojah-inc:sdk-kotlin:v0.4.6" dojah-dependency.txt
+
+      - name: Prevent Dojah BlurView runtime crash
+        working-directory: android
+        run: |
+          ./gradlew :app:dependencyInsight --dependency BlurView --configuration releaseRuntimeClasspath --no-daemon | tee blurview-dependency.txt
+          grep -q "com.github.Dimezis:BlurView:version-2.0.3" blurview-dependency.txt
+          if grep -q "com.github.Dimezis:BlurView:version-3" blurview-dependency.txt; then
+            echo "An incompatible BlurView 3.x dependency would crash Dojah after the selfie step."
+            exit 1
+          fi
+
       - name: Build standalone APK
         working-directory: android
         run: ./gradlew :app:assembleRelease --no-daemon

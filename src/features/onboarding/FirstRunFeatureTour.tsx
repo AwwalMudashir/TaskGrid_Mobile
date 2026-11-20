@@ -1,5 +1,4 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -305,7 +304,7 @@ export function FirstRunFeatureTour() {
 
         {navTarget ? (
           <>
-            <BlurPanel style={styles.fullBlur} dark={isDark} />
+            <DimPanel style={styles.fullDim} dark={isDark} />
             <View
               pointerEvents="none"
               style={[
@@ -336,7 +335,7 @@ export function FirstRunFeatureTour() {
           </>
         ) : sosTarget ? (
           <>
-            <BlurPanel style={styles.fullBlur} dark={isDark} />
+            <DimPanel style={styles.fullDim} dark={isDark} />
             <SosDemoPage layout={sosDemoLayout} />
             <Animated.View
               pointerEvents="none"
@@ -520,8 +519,8 @@ function HeroSpotlight({
 }) {
   return (
     <>
-      <BlurPanel style={{ left: 0, top: 0, width, height: target.y }} dark={dark} />
-      <BlurPanel
+      <DimPanel style={{ left: 0, top: 0, width, height: target.y }} dark={dark} />
+      <DimPanel
         style={{
           left: 0,
           top: target.y,
@@ -530,7 +529,7 @@ function HeroSpotlight({
         }}
         dark={dark}
       />
-      <BlurPanel
+      <DimPanel
         style={{
           left: target.x + target.width,
           top: target.y,
@@ -539,7 +538,7 @@ function HeroSpotlight({
         }}
         dark={dark}
       />
-      <BlurPanel
+      <DimPanel
         style={{
           left: 0,
           top: target.y + target.height,
@@ -552,25 +551,25 @@ function HeroSpotlight({
   );
 }
 
-function BlurPanel({ style, dark }: { style: ViewStyle; dark: boolean }) {
+function DimPanel({ style, dark }: { style: ViewStyle; dark: boolean }) {
   return (
-    <BlurView
+    <View
       pointerEvents="none"
-      intensity={48}
-      tint={dark ? 'dark' : 'regular'}
-      blurMethod="dimezisBlurViewSdk31Plus"
-      style={[styles.blurPanel, style]}
+      style={[
+        styles.dimPanel,
+        { backgroundColor: dark ? 'rgba(3, 9, 22, 0.72)' : 'rgba(8, 17, 36, 0.58)' },
+        style,
+      ]}
     />
   );
 }
 
 const styles = StyleSheet.create({
   overlay: { flex: 1 },
-  blurPanel: {
+  dimPanel: {
     position: 'absolute',
-    backgroundColor: 'rgba(5, 12, 28, 0.38)',
   },
-  fullBlur: { left: 0, top: 0, right: 0, bottom: 0 },
+  fullDim: { left: 0, top: 0, right: 0, bottom: 0 },
   navSpotlight: {
     position: 'absolute',
     zIndex: 4,
