@@ -93,6 +93,7 @@
       "./plugins/withAllowScreenSharing",
       "./plugins/withAndroidDesugaring",
       "dojah-kyc-sdk-react-expo",
+      "./plugins/withDojahBlurViewCompatibility",
       [
         "expo-build-properties",
         {
