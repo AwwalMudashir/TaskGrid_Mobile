@@ -14,6 +14,11 @@ import { Screen } from '@/src/components/ui/Screen';
 import { SurfaceCard } from '@/src/components/ui/SurfaceCard';
 import { TextField } from '@/src/components/ui/TextField';
 import { useAuth } from '@/src/features/auth/AuthContext';
+import {
+  kycReferenceTag,
+  traceKyc,
+  traceKycError,
+} from '@/src/features/kyc/diagnostics';
 import { launchDojahKyc } from '@/src/features/kyc/dojah';
 import type { DojahLaunchResult, KycStatus, KycStatusResult } from '@/src/features/kyc/types';
 import { ApiError, kycApi } from '@/src/lib/api';
@@ -156,9 +161,17 @@ export default function KycScreen() {
   const loadStatus = useCallback(async () => {
     setLoading(true);
     setError('');
+    traceKyc('status_load_started');
     try {
-      setResult(await kycApi.status());
+      const latest = await kycApi.status();
+      setResult(latest);
+      traceKyc('status_load_finished', {
+        reference: kycReferenceTag(latest.referenceId),
+        taskgridStatus: latest.status,
+        providerStatus: latest.providerStatus,
+      });
     } catch (cause) {
+      traceKycError('status_load_failed', cause);
       setError(errorMessage(cause));
     } finally {
       setLoading(false);
@@ -174,12 +187,24 @@ export default function KycScreen() {
   async function refreshAfterWidget(widgetResult: DojahLaunchResult) {
     setCheckingResult(true);
     setError('');
+    traceKyc('post_widget_sync_started', { widgetResult });
     try {
       let latest: KycStatusResult;
       try {
         latest = await kycApi.sync();
-      } catch {
+        traceKyc('post_widget_provider_sync_finished', {
+          reference: kycReferenceTag(latest.referenceId),
+          taskgridStatus: latest.status,
+          providerStatus: latest.providerStatus,
+        });
+      } catch (syncError) {
+        traceKycError('post_widget_provider_sync_failed', syncError);
         latest = await kycApi.status();
+        traceKyc('post_widget_database_status_finished', {
+          reference: kycReferenceTag(latest.referenceId),
+          taskgridStatus: latest.status,
+          providerStatus: latest.providerStatus,
+        });
       }
       setResult(latest);
 
@@ -197,6 +222,7 @@ export default function KycScreen() {
         setNotice('Your verification was submitted and its latest status is shown below.');
       }
     } catch (cause) {
+      traceKycError('post_widget_status_failed', cause, { widgetResult });
       setError(errorMessage(cause));
     } finally {
       setCheckingResult(false);
@@ -210,7 +236,12 @@ export default function KycScreen() {
     setError('');
     setNotice('');
     try {
+      traceKyc('restart_session_requested');
       const session = await kycApi.restartSession();
+      traceKyc('restart_session_created', {
+        reference: kycReferenceTag(session.referenceId),
+        environment: session.environment,
+      });
       setResult((current) =>
         current
           ? {
@@ -225,6 +256,7 @@ export default function KycScreen() {
       const widgetResult = await launchDojahKyc(session, user);
       await refreshAfterWidget(widgetResult);
     } catch (cause) {
+      traceKycError('restart_verification_failed', cause);
       setError(errorMessage(cause));
     } finally {
       setRestarting(false);
@@ -242,10 +274,16 @@ export default function KycScreen() {
     setError('');
     setNotice('');
     try {
+      traceKyc('session_requested');
       const session = await kycApi.startSession();
+      traceKyc('session_ready', {
+        reference: kycReferenceTag(session.referenceId),
+        environment: session.environment,
+      });
       const widgetResult = await launchDojahKyc(session, user);
       await refreshAfterWidget(widgetResult);
     } catch (cause) {
+      traceKycError('begin_verification_failed', cause);
       setError(errorMessage(cause));
     } finally {
       setLaunching(false);
@@ -257,9 +295,21 @@ export default function KycScreen() {
     setError('');
     setNotice('');
     try {
-      setResult(result?.referenceId ? await kycApi.sync() : await kycApi.status());
+      traceKyc('manual_status_refresh_started', {
+        reference: kycReferenceTag(result?.referenceId),
+      });
+      const latest = result?.referenceId ? await kycApi.sync() : await kycApi.status();
+      setResult(latest);
+      traceKyc('manual_status_refresh_finished', {
+        reference: kycReferenceTag(latest.referenceId),
+        taskgridStatus: latest.status,
+        providerStatus: latest.providerStatus,
+      });
       setNotice('Your latest verification status is now shown.');
     } catch (cause) {
+      traceKycError('manual_status_refresh_failed', cause, {
+        reference: kycReferenceTag(result?.referenceId),
+      });
       setError(errorMessage(cause));
     } finally {
       setCheckingResult(false);

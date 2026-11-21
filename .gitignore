@@ -25,6 +25,9 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+dojah-*-log.txt
+android-locked-backup-*/
+.report-erd-inspect/
 
 # macOS
 .DS_Store

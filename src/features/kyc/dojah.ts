@@ -1,6 +1,11 @@
 import { Platform } from 'react-native';
 
 import type { User } from '@/src/features/auth/types';
+import {
+  kycReferenceTag,
+  traceKyc,
+  traceKycError,
+} from '@/src/features/kyc/diagnostics';
 import type { DojahLaunchResult, KycSession } from '@/src/features/kyc/types';
 
 const knownResults = new Set<DojahLaunchResult>(['approved', 'pending', 'failed', 'closed']);
@@ -18,30 +23,67 @@ export async function launchDojahKyc(
     throw new Error('Identity verification is available in the TaskGrid Android and iOS apps.');
   }
 
+  const reference = kycReferenceTag(session.referenceId);
+  traceKyc('sdk_import_started', { platform: Platform.OS, reference });
   const { default: DojahKycSdk } = await import('dojah-kyc-sdk-react-expo');
+  traceKyc('sdk_import_finished', { platform: Platform.OS, reference });
   const nameParts = user.fullName.trim().split(/\s+/).filter(Boolean);
   const firstName = nameParts.shift() ?? '';
   const lastName = nameParts.join(' ');
 
-  const sdkResult = await DojahKycSdk.launch(
-    session.widgetId,
-    session.referenceId,
-    user.email,
-    {
-      userData: {
-        firstName,
-        lastName,
-        email: user.email,
-      },
-      metadata: {
-        taskgridUserId: user.id,
-        referenceId: session.referenceId,
-        environment: session.environment,
-      },
-    },
-  );
+  const startedAt = Date.now();
+  const pendingHeartbeat = setInterval(() => {
+    traceKyc('sdk_launch_still_pending', {
+      platform: Platform.OS,
+      reference,
+      durationMs: Date.now() - startedAt,
+    });
+  }, 15_000);
+  traceKyc('sdk_launch_started', {
+    platform: Platform.OS,
+    reference,
+    environment: session.environment,
+  });
 
-  if (typeof sdkResult !== 'string') return 'unknown';
-  const normalized = sdkResult.trim().toLowerCase() as DojahLaunchResult;
-  return knownResults.has(normalized) ? normalized : 'unknown';
+  try {
+    const sdkResult = await DojahKycSdk.launch(
+      session.widgetId,
+      session.referenceId,
+      user.email,
+      {
+        userData: {
+          firstName,
+          lastName,
+          email: user.email,
+        },
+        metadata: {
+          taskgridUserId: user.id,
+          referenceId: session.referenceId,
+          environment: session.environment,
+        },
+      },
+    );
+
+    const normalized =
+      typeof sdkResult === 'string'
+        ? (sdkResult.trim().toLowerCase() as DojahLaunchResult)
+        : 'unknown';
+    const result = knownResults.has(normalized) ? normalized : 'unknown';
+    traceKyc('sdk_launch_returned', {
+      platform: Platform.OS,
+      reference,
+      result,
+      durationMs: Date.now() - startedAt,
+    });
+    return result;
+  } catch (error) {
+    traceKycError('sdk_launch_failed', error, {
+      platform: Platform.OS,
+      reference,
+      durationMs: Date.now() - startedAt,
+    });
+    throw error;
+  } finally {
+    clearInterval(pendingHeartbeat);
+  }
 }

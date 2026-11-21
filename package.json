@@ -46,6 +46,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "postinstall": "node ./scripts/patch-dojah-diagnostics.mjs",
     "start": "expo start",
     "start:dev": "expo start --dev-client",
     "start:device": "powershell -ExecutionPolicy Bypass -File ./scripts/start-android-device.ps1",
