@@ -103,12 +103,23 @@ export function RecommendedTaskSkeleton() {
             { backgroundColor: colors.surface, borderColor: colors.border },
           ]}
         >
-          <SkeletonBlock width={42} height={42} borderRadius={radius.md} />
-          <View style={styles.grow}>
-            <SkeletonBlock width="74%" height={15} />
-            <SkeletonBlock width="92%" height={11} />
+            <View style={styles.taskTop}>
+              <View style={styles.skeletonCategory}>
+                <SkeletonBlock width={42} height={42} borderRadius={radius.md} />
+                <View style={styles.grow}>
+                  <SkeletonBlock width="48%" height={11} />
+                  <SkeletonBlock width="72%" height={10} />
+                </View>
+              </View>
+              <SkeletonBlock width={76} height={24} borderRadius={radius.pill} />
           </View>
-          <SkeletonBlock width={66} height={15} />
+            <SkeletonBlock width="78%" height={18} />
+            <SkeletonBlock width="100%" height={12} />
+            <SkeletonBlock width="86%" height={12} />
+            <View style={styles.taskBottom}>
+              <SkeletonBlock width={118} height={12} />
+              <SkeletonBlock width={76} height={17} />
+            </View>
         </View>
       ))}
     </View>
@@ -280,14 +291,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   recommendedTask: {
-    minHeight: 72,
+    minHeight: 188,
     borderWidth: 1,
     borderRadius: radius.lg,
-    padding: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
+    padding: spacing.lg,
     gap: spacing.md,
   },
+  skeletonCategory: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   grow: { flex: 1, gap: spacing.sm },
   workerRow: { flexDirection: "row", gap: spacing.md, overflow: "hidden" },
   workerCard: {

@@ -159,6 +159,8 @@ export type TaskDetail = TaskCard & {
   maximumApplicationPrice: number;
   safetyWindowOpen: boolean;
   conversationAvailable: boolean;
+  safetyReviewActive: boolean;
+  safetyReviewRaisedByViewer: boolean;
   evidenceComparison: EvidenceComparison | null;
 };
 
@@ -431,6 +433,12 @@ export const taskApi = {
       },
       { authenticated: true },
     );
+  },
+  retryEvidenceComparison(id: string) {
+    return apiRequest<void>(`/tasks/${id}/evidence-comparison/retry`, {
+      method: 'POST',
+      authenticated: true,
+    });
   },
   post(body: CreateTask) {
     return apiRequest<TaskDetail>('/tasks', {

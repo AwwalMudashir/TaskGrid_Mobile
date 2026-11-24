@@ -21,11 +21,12 @@ export function RecommendedTasks() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const [tasks, setTasks] = useState<TaskSummary[] | null>(null);
+
   useFocusEffect(
     useCallback(() => {
       let active = true;
-    discoveryApi
-      .tasks()
+      discoveryApi
+        .tasks()
         .then((items) => {
           if (active) setTasks(items);
         })
@@ -37,6 +38,7 @@ export function RecommendedTasks() {
       };
     }, []),
   );
+
   return (
     <View style={styles.section}>
       <View>
@@ -75,38 +77,58 @@ export function RecommendedTasks() {
                 },
               ]}
             >
-              <View style={[styles.icon, { backgroundColor: colors.primarySoft }]}>
-                <Ionicons name="briefcase-outline" size={20} color={colors.primary} />
-              </View>
-              <View style={styles.copy}>
-                <View style={styles.titleRow}>
-                  <AppText variant="bodyMedium" numberOfLines={1} style={styles.title}>
-                    {task.title}
-                  </AppText>
-                  <View style={[styles.score, { backgroundColor: colors.successSoft }]}>
-                    <AppText variant="caption" color={colors.success}>
-                      {task.recommendationScore}% match
+              <View style={styles.cardHeader}>
+                <View style={styles.categoryGroup}>
+                  <View style={[styles.icon, { backgroundColor: colors.primarySoft }]}>
+                    <Ionicons name="briefcase-outline" size={20} color={colors.primary} />
+                  </View>
+                  <View style={styles.categoryCopy}>
+                    <AppText variant="eyebrow" color={colors.primary} numberOfLines={1}>
+                      {task.category}
+                    </AppText>
+                    <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
+                      {task.locationDescription}
                     </AppText>
                   </View>
                 </View>
-                <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
-                  {task.category} · {task.locationDescription}
+                <View style={[styles.score, { backgroundColor: colors.successSoft }]}>
+                  <AppText variant="caption" color={colors.success}>
+                    {task.recommendationScore}% match
+                  </AppText>
+                </View>
+              </View>
+
+              <View style={styles.copy}>
+                <AppText variant="subtitle" numberOfLines={2} style={styles.title}>
+                  {task.title}
                 </AppText>
-                <AppText variant="caption" color={colors.textSecondary} numberOfLines={2}>
+                <AppText color={colors.textSecondary} numberOfLines={3} style={styles.explanation}>
                   {task.recommendationExplanation}
                 </AppText>
-                {task.distanceKm != null ? (
-                  <AppText variant="caption" color={colors.primary}>
-                    {task.distanceKm.toFixed(1)} km
-                    {task.estimatedTravelMinutes != null
-                      ? ` · about ${task.estimatedTravelMinutes} min`
-                      : ''}
-                  </AppText>
-                ) : null}
               </View>
-              <AppText variant="bodyMedium" color={colors.primary}>
-                {task.budget == null ? 'Price unavailable' : money.format(task.budget)}
-              </AppText>
+
+              <View style={[styles.cardFooter, { borderTopColor: colors.divider }]}>
+                <View style={styles.travelGroup}>
+                  <Ionicons name="navigate-outline" size={16} color={colors.textMuted} />
+                  <AppText variant="caption" color={colors.textSecondary}>
+                    {task.distanceKm != null
+                      ? `${task.distanceKm.toFixed(1)} km${
+                          task.estimatedTravelMinutes != null
+                            ? ` · about ${task.estimatedTravelMinutes} min`
+                            : ''
+                        }`
+                      : 'Distance available with location'}
+                  </AppText>
+                </View>
+                <View style={styles.priceGroup}>
+                  <AppText variant="caption" color={colors.textMuted}>
+                    Budget
+                  </AppText>
+                  <AppText variant="bodyMedium" color={colors.primary}>
+                    {task.budget == null ? 'Not set' : money.format(task.budget)}
+                  </AppText>
+                </View>
+              </View>
             </Pressable>
           ))}
         </View>
@@ -117,16 +139,22 @@ export function RecommendedTasks() {
 
 const styles = StyleSheet.create({
   section: { gap: spacing.md },
-  list: { gap: spacing.sm },
+  list: { gap: spacing.md },
   card: {
-    minHeight: 96,
+    minHeight: 188,
     borderWidth: 1,
     borderRadius: radius.lg,
-    padding: spacing.md,
+    padding: spacing.lg,
+    gap: spacing.lg,
+  },
+  cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: spacing.md,
   },
+  categoryGroup: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  categoryCopy: { flex: 1, gap: 2 },
   icon: {
     width: 42,
     height: 42,
@@ -134,12 +162,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  copy: { flex: 1, gap: 2 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  title: { flex: 1 },
+  copy: { gap: spacing.sm },
+  title: { lineHeight: 23 },
+  explanation: { lineHeight: 20 },
   score: {
     borderRadius: radius.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: 3,
   },
+  cardFooter: {
+    borderTopWidth: 1,
+    paddingTop: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  travelGroup: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  priceGroup: { alignItems: 'flex-end', gap: 2 },
 });

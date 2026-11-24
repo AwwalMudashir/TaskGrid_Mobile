@@ -53,6 +53,8 @@ import { ApiError, kycApi } from '@/src/lib/api';
 import { safetyApi } from '@/src/features/safety/safety-api';
 import { radius, spacing, useAppTheme } from '@/src/theme';
 
+WebBrowser.maybeCompleteAuthSession();
+
 const money = (amount: number | null) =>
   amount == null
     ? 'To agree'
@@ -78,6 +80,8 @@ type BusyAction =
   | 'report-review'
   | 'manual-arrival'
   | 'cancel-task'
+  | 'evidence-retry'
+  | 'sos-cancel'
   | 'sos';
 
 const cancellationReasons: { value: TaskCancellationReason; label: string }[] = [
@@ -230,6 +234,7 @@ export default function TaskDetailScreen() {
   const [reminderBusy, setReminderBusy] = useState(false);
   const handledReminderId = useRef<string | null>(null);
   const evidenceComparisonPolls = useRef(0);
+  const paymentReturnPolls = useRef(0);
   const [briefPhotos, setBriefPhotos] = useState<LocalProfileImage[]>([]);
   const [completionPhotos, setCompletionPhotos] = useState<LocalProfileImage[]>([]);
   const [lastCoordinate, setLastCoordinate] = useState<Coordinates | null>(null);
@@ -293,6 +298,28 @@ export default function TaskDetailScreen() {
       void refresh();
     }, [refresh]),
   );
+
+  useEffect(() => {
+    if (paymentReturn !== 'true' || !id) return;
+    let cancelled = false;
+
+    const confirmReturnedPayment = async () => {
+      while (!cancelled && paymentReturnPolls.current < 8) {
+        paymentReturnPolls.current += 1;
+        const updated = await refresh(true, true);
+        if (updated?.paymentStatus && updated.paymentStatus !== 'INITIALIZED') {
+          router.setParams({ paymentReturn: undefined });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+      }
+    };
+
+    void confirmReturnedPayment();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, paymentReturn, refresh, router]);
 
   useEffect(() => {
     evidenceComparisonPolls.current = 0;
@@ -373,7 +400,9 @@ export default function TaskDetailScreen() {
   const canUseTaskConversation = Boolean(
     (isOwner || isAssigned) && task?.assignedRunnerId && task.conversationAvailable,
   );
-  const canUseSos = Boolean((isOwner || isAssigned) && task?.safetyWindowOpen);
+  const canUseSos = Boolean(
+    (isOwner || isAssigned) && task?.safetyWindowOpen && !task.safetyReviewActive,
+  );
   const canConfirmDeparture = Boolean(
     isAssigned && task?.status === 'DISPUTED' && task.safetyWindowOpen,
   );
@@ -675,6 +704,7 @@ export default function TaskDetailScreen() {
       });
       setSosVisible(false);
       setSosNote('');
+      await refresh(true, true);
       Alert.alert(
         result.smsDeliveredToProvider ? 'Emergency SMS queued' : 'SMS could not be sent',
         result.message,
@@ -690,6 +720,41 @@ export default function TaskDetailScreen() {
       );
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "We couldn't send the SOS alert.");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function confirmSosCancellation() {
+    if (!task || busy || !task.safetyReviewRaisedByViewer) return;
+    Alert.alert(
+      'Cancel this SOS alert?',
+      'Use this only if the SOS was sent by mistake. The task and protected payment will resume, but an emergency SMS that was already sent cannot be recalled.',
+      [
+        { text: 'Keep safety review', style: 'cancel' },
+        {
+          text: 'It was a mistake',
+          style: 'destructive',
+          onPress: () => void cancelAccidentalSos(),
+        },
+      ],
+    );
+  }
+
+  async function cancelAccidentalSos() {
+    if (!task || busy || !task.safetyReviewRaisedByViewer) return;
+    setBusyAction('sos-cancel');
+    setError('');
+    try {
+      const result = await safetyApi.cancelSos(task.id);
+      await refresh(false, true);
+      Alert.alert('SOS cancelled', result.message);
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : "We couldn't cancel this SOS alert. Try again or contact support.",
+      );
     } finally {
       setBusyAction(null);
     }
@@ -885,6 +950,25 @@ export default function TaskDetailScreen() {
     }
   }
 
+  async function retryEvidenceComparison() {
+    if (!task || busy) return;
+    setBusyAction('evidence-retry');
+    setError('');
+    try {
+      await taskApi.retryEvidenceComparison(task.id);
+      evidenceComparisonPolls.current = 0;
+      await refresh(true, true);
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : "We couldn't restart the photo comparison. Try again.",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function submitReview() {
     if (!task || reviewRating < 1 || busy) return;
     setBusyAction('review');
@@ -979,6 +1063,50 @@ export default function TaskDetailScreen() {
               </View>
             </View>
           </AnimatedEntrance>
+          {task.safetyReviewActive ? (
+            <AnimatedEntrance delay={25}>
+              <View
+                style={[
+                  styles.safetyReviewNotice,
+                  { backgroundColor: colors.dangerSoft, borderLeftColor: colors.danger },
+                ]}
+              >
+                <Ionicons
+                  name="shield-outline"
+                  size={72}
+                  color={colors.danger}
+                  style={styles.safetyReviewWatermark}
+                />
+                <AppText variant="eyebrow" color={colors.danger}>
+                  TASK PAUSED FOR SAFETY
+                </AppText>
+                <AppText variant="title" style={styles.safetyReviewTitle}>
+                  SOS review in progress
+                </AppText>
+                <AppText color={colors.textSecondary} style={styles.safetyReviewCopy}>
+                  {task.safetyReviewRaisedByViewer
+                    ? 'You raised an SOS for this task. The task and payment are paused while the safety alert is reviewed.'
+                    : 'An SOS was raised for this task. Work and payment actions are paused while the safety alert is reviewed.'}
+                </AppText>
+                {task.safetyReviewRaisedByViewer ? (
+                  <Button
+                    label={
+                      busyAction === 'sos-cancel' ? 'Cancelling SOS' : 'I sent this by mistake'
+                    }
+                    variant="secondary"
+                    icon="close-circle-outline"
+                    disabled={busy}
+                    loading={busyAction === 'sos-cancel'}
+                    onPress={confirmSosCancellation}
+                  />
+                ) : (
+                  <AppText variant="caption" color={colors.danger}>
+                    TaskGrid will notify you when the safety review changes.
+                  </AppText>
+                )}
+              </View>
+            </AnimatedEntrance>
+          ) : null}
           {publicTaskLocation && !isOwner && !isAssigned ? (
             <AnimatedEntrance delay={35}>
               <TaskAreaMap
@@ -1625,7 +1753,11 @@ export default function TaskDetailScreen() {
           ) : null}
 
           {isOwner && task.runnerCompletedAt && (task.briefImages?.length ?? 0) > 0 ? (
-            <CompletionEvidenceComparisonView comparison={task.evidenceComparison} />
+            <CompletionEvidenceComparisonView
+              comparison={task.evidenceComparison}
+              retrying={busyAction === 'evidence-retry'}
+              onRetry={() => void retryEvidenceComparison()}
+            />
           ) : null}
 
           {isOwner && isOpen(task) ? (
@@ -1642,10 +1774,15 @@ export default function TaskDetailScreen() {
                 {task.bids.length > 5 ? (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={showAllApplicants ? 'Show the top five applicants' : 'See all applicants'}
+                    accessibilityLabel={
+                      showAllApplicants ? 'Show the top five applicants' : 'See all applicants'
+                    }
                     hitSlop={10}
                     onPress={() => setShowAllApplicants((current) => !current)}
-                    style={({ pressed }) => [styles.seeAllApplicants, { opacity: pressed ? 0.55 : 1 }]}
+                    style={({ pressed }) => [
+                      styles.seeAllApplicants,
+                      { opacity: pressed ? 0.55 : 1 },
+                    ]}
                   >
                     <AppText variant="bodyMedium" color={colors.primary}>
                       {showAllApplicants ? 'Show top 5' : 'See all'}
@@ -1660,63 +1797,69 @@ export default function TaskDetailScreen() {
                   </AppText>
                 </SurfaceCard>
               ) : (
-                (showAllApplicants ? task.bids : task.bids.slice(0, 5)).map((bid, index, visibleBids) => (
-                  <Pressable
-                    key={bid.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={`View ${bid.runnerName}'s application`}
-                    onPress={() => setSelectedBid(bid)}
-                    style={({ pressed }) => [
-                      styles.bidRow,
-                      {
-                        borderBottomColor: colors.divider,
-                        opacity: pressed ? 0.72 : 1,
-                        borderBottomWidth:
-                          index === visibleBids.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                      },
-                    ]}
-                  >
-                    <View style={[styles.bidAvatar, { backgroundColor: colors.primarySoft }]}>
-                      {bid.runnerPictureUrl ? (
-                        <Image
-                          source={{ uri: bid.runnerPictureUrl }}
-                          style={styles.bidAvatarImage}
-                        />
-                      ) : (
-                        <AppText variant="subtitle" color={colors.primary}>
-                          {bid.runnerName.charAt(0).toUpperCase()}
-                        </AppText>
-                      )}
-                    </View>
-                    <View style={styles.bidSummary}>
-                      <View style={styles.bidNameRow}>
-                        <AppText variant="bodyMedium" numberOfLines={1} style={styles.bidName}>
-                          {bid.runnerName}
-                        </AppText>
-                        <AppText variant="caption" color={colors.primary} style={styles.matchLabel}>
-                          {bid.matchPercentage ?? 0}% match
-                        </AppText>
+                (showAllApplicants ? task.bids : task.bids.slice(0, 5)).map(
+                  (bid, index, visibleBids) => (
+                    <Pressable
+                      key={bid.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${bid.runnerName}'s application`}
+                      onPress={() => setSelectedBid(bid)}
+                      style={({ pressed }) => [
+                        styles.bidRow,
+                        {
+                          borderBottomColor: colors.divider,
+                          opacity: pressed ? 0.72 : 1,
+                          borderBottomWidth:
+                            index === visibleBids.length - 1 ? 0 : StyleSheet.hairlineWidth,
+                        },
+                      ]}
+                    >
+                      <View style={[styles.bidAvatar, { backgroundColor: colors.primarySoft }]}>
+                        {bid.runnerPictureUrl ? (
+                          <Image
+                            source={{ uri: bid.runnerPictureUrl }}
+                            style={styles.bidAvatarImage}
+                          />
+                        ) : (
+                          <AppText variant="subtitle" color={colors.primary}>
+                            {bid.runnerName.charAt(0).toUpperCase()}
+                          </AppText>
+                        )}
                       </View>
-                      <View style={styles.inlineMeta}>
-                        <Ionicons name="star" size={14} color={colors.warning} />
-                        <AppText variant="caption" color={colors.textSecondary}>
-                          {bid.averageRating && bid.averageRating > 0
-                            ? bid.averageRating.toFixed(1)
-                            : 'New'}
-                          {'  ·  '}
-                          {bid.etaMinutes} min away
-                        </AppText>
+                      <View style={styles.bidSummary}>
+                        <View style={styles.bidNameRow}>
+                          <AppText variant="bodyMedium" numberOfLines={1} style={styles.bidName}>
+                            {bid.runnerName}
+                          </AppText>
+                          <AppText
+                            variant="caption"
+                            color={colors.primary}
+                            style={styles.matchLabel}
+                          >
+                            {bid.matchPercentage ?? 0}% match
+                          </AppText>
+                        </View>
+                        <View style={styles.inlineMeta}>
+                          <Ionicons name="star" size={14} color={colors.warning} />
+                          <AppText variant="caption" color={colors.textSecondary}>
+                            {bid.averageRating && bid.averageRating > 0
+                              ? bid.averageRating.toFixed(1)
+                              : 'New'}
+                            {'  ·  '}
+                            {bid.etaMinutes} min away
+                          </AppText>
+                        </View>
                       </View>
-                    </View>
-                    <View style={styles.bidPrice}>
-                      <AppText variant="bodyMedium">{money(bid.proposedPrice)}</AppText>
-                      <AppText variant="caption" color={colors.textMuted}>
-                        {bid.matchesPostedPrice ? 'Posted price' : 'Adjusted'}
-                      </AppText>
-                      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                    </View>
-                  </Pressable>
-                ))
+                      <View style={styles.bidPrice}>
+                        <AppText variant="bodyMedium">{money(bid.proposedPrice)}</AppText>
+                        <AppText variant="caption" color={colors.textMuted}>
+                          {bid.matchesPostedPrice ? 'Posted price' : 'Adjusted'}
+                        </AppText>
+                        <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                      </View>
+                    </Pressable>
+                  ),
+                )
               )}
             </View>
           ) : null}
@@ -2234,9 +2377,7 @@ export default function TaskDetailScreen() {
                   <AppText variant="eyebrow" color={colors.primary}>
                     Why this match
                   </AppText>
-                  <AppText color={colors.textSecondary}>
-                    {selectedBid.matchExplanation}
-                  </AppText>
+                  <AppText color={colors.textSecondary}>{selectedBid.matchExplanation}</AppText>
                   <AppText variant="caption" color={colors.textMuted}>
                     This score supports comparison only. TaskGrid does not choose a worker for you.
                   </AppText>
@@ -2814,8 +2955,12 @@ function TaskImageGallery({ title, images }: { title: string; images: TaskImage[
 
 function CompletionEvidenceComparisonView({
   comparison,
+  retrying,
+  onRetry,
 }: {
   comparison: EvidenceComparison | null;
+  retrying: boolean;
+  onRetry(): void;
 }) {
   const { colors } = useAppTheme();
   const completed = comparison?.status === 'COMPLETED' && comparison.visualAlignmentScore != null;
@@ -2891,6 +3036,16 @@ function CompletionEvidenceComparisonView({
               {comparison?.summary ||
                 'TaskGrid is reviewing the original and completed-work photos. This may take a moment.'}
             </AppText>
+            {(comparison?.status === 'FAILED' || comparison?.status === 'NOT_AVAILABLE') &&
+            comparison.briefImageCount > 0 &&
+            comparison.completionImageCount > 0 ? (
+              <Button
+                label={retrying ? 'Restarting comparison' : 'Try comparison again'}
+                variant="secondary"
+                disabled={retrying}
+                onPress={onRetry}
+              />
+            ) : null}
           </View>
         )}
 
@@ -2931,6 +3086,22 @@ function EvidenceObservationList({
 
 const styles = StyleSheet.create({
   screen: { gap: spacing.lg, paddingBottom: spacing.xxxl },
+  safetyReviewNotice: {
+    position: 'relative',
+    overflow: 'hidden',
+    borderLeftWidth: 4,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    gap: spacing.sm,
+  },
+  safetyReviewWatermark: {
+    position: 'absolute',
+    right: -8,
+    top: -8,
+    opacity: 0.1,
+  },
+  safetyReviewTitle: { maxWidth: '82%' },
+  safetyReviewCopy: { maxWidth: '92%', lineHeight: 21, marginBottom: spacing.xs },
   hero: {
     minHeight: 224,
     gap: spacing.sm,

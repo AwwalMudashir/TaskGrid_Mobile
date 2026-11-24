@@ -98,16 +98,25 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
         style={styles.gradient}
       >
         <View style={styles.center}>
-          <Animated.Image
-            accessibilityLabel="TaskGrid logo"
-            accessibilityIgnoresInvertColors
-            resizeMode="contain"
-            source={require('../../assets/images/branding/taskgrid-mark.png')}
-            style={[
-              styles.artwork,
-              { transform: [{ scale: combinedScale }, { translateY: combinedOffset }] },
-            ]}
-          />
+          <View style={styles.brandLockup}>
+            <View style={styles.artworkFrame}>
+              <Animated.Image
+                accessibilityLabel="TaskGrid logo"
+                accessibilityIgnoresInvertColors
+                resizeMode="contain"
+                source={require('../../assets/images/branding/taskgrid-mark.png')}
+                style={[
+                  styles.artwork,
+                  {
+                    transform: [
+                      { translateX: -2 },
+                      { scale: combinedScale },
+                      { translateY: combinedOffset },
+                    ],
+                  },
+                ]}
+              />
+            </View>
           <Animated.View
             style={[styles.copy, { opacity: copyOpacity, transform: [{ translateY: copyOffset }] }]}
           >
@@ -118,6 +127,7 @@ export function AnimatedSplash({ ready, onFinish }: AnimatedSplashProps) {
               Trusted hands. Tasks done.
             </AppText>
           </Animated.View>
+          </View>
         </View>
         <Animated.View style={[styles.footer, { opacity: copyOpacity }]}>
           <View style={styles.loadingTrack}>
@@ -141,8 +151,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.xxxl,
   },
+  brandLockup: { width: '100%', alignItems: 'center' },
+  artworkFrame: {
+    width: 196,
+    height: 196,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   artwork: { width: 196, height: 196, zIndex: 2 },
-  copy: { alignItems: 'center', marginTop: spacing.lg, gap: spacing.sm },
+  copy: { width: '100%', alignItems: 'center', marginTop: spacing.md, gap: spacing.sm },
   tagline: { textAlign: 'center', maxWidth: 300 },
   footer: { alignItems: 'center', gap: spacing.md, paddingBottom: 46 },
   loadingTrack: {
