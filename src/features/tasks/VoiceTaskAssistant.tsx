@@ -37,6 +37,9 @@ type VoiceTaskAssistantProps = {
 };
 
 const WAVE_HEIGHTS = [22, 36, 52, 68, 47, 31, 20];
+const SPEECH_ACTIVITY_TIMEOUT_MS = 12_000;
+const NO_SPEECH_MESSAGE =
+  'We could not hear any speech. If a call or meeting is open, leave it first because muting it may not release the microphone. Your existing note is still saved.';
 
 function skillIconName(skill: Skill | null | undefined): keyof typeof Ionicons.glyphMap {
   const icon = skill?.iconName;
@@ -74,22 +77,35 @@ export function VoiceTaskAssistant({
   const keepListening = useRef(false);
   const visibleRef = useRef(visible);
   const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recognitionWatchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const segmentHeardSpeech = useRef(false);
   const pulse = useRef(new Animated.Value(1)).current;
   const waveValues = useRef(WAVE_HEIGHTS.map(() => new Animated.Value(0.35))).current;
 
-  useSpeechRecognitionEvent('start', () => setListening(true));
+  useSpeechRecognitionEvent('start', () => {
+    setListening(true);
+    startRecognitionWatchdog();
+  });
   useSpeechRecognitionEvent('end', () => {
+    clearRecognitionWatchdog();
     committedTranscript.current = transcriptRef.current.trim();
-    if (keepListening.current && visibleRef.current) {
+    if (keepListening.current && visibleRef.current && segmentHeardSpeech.current) {
       clearRecognitionRestart();
       restartTimer.current = setTimeout(startRecognitionSegment, 250);
       return;
+    }
+
+    if (keepListening.current && visibleRef.current && !segmentHeardSpeech.current) {
+      keepListening.current = false;
+      setError(NO_SPEECH_MESSAGE);
     }
     setListening(false);
   });
   useSpeechRecognitionEvent('result', (event) => {
     const heard = event.results[0]?.transcript?.trim();
     if (!heard) return;
+    segmentHeardSpeech.current = true;
+    startRecognitionWatchdog();
     const combined = mergeTranscript(segmentBaseTranscript.current, heard);
     transcriptRef.current = combined;
     setTranscript(combined);
@@ -99,12 +115,17 @@ export function VoiceTaskAssistant({
     }
   });
   useSpeechRecognitionEvent('error', (event) => {
+    clearRecognitionWatchdog();
     committedTranscript.current = transcriptRef.current.trim();
-    if (event.error === 'aborted' || event.error === 'no-speech') return;
+    if (event.error === 'aborted') return;
 
     keepListening.current = false;
     setListening(false);
-    console.warn('[TaskGrid voice] Speech recognition failed', event.error, event.message);
+    console.warn('[TaskGrid voice] Speech recognition failed', {
+      error: event.error,
+      code: event.code,
+      message: event.message,
+    });
     setError(speechRecognitionMessage(event.error));
   });
 
@@ -115,10 +136,31 @@ export function VoiceTaskAssistant({
     }
   }
 
+  function clearRecognitionWatchdog() {
+    if (recognitionWatchdog.current) {
+      clearTimeout(recognitionWatchdog.current);
+      recognitionWatchdog.current = null;
+    }
+  }
+
+  function startRecognitionWatchdog() {
+    clearRecognitionWatchdog();
+    recognitionWatchdog.current = setTimeout(() => {
+      if (!keepListening.current || !visibleRef.current) return;
+
+      keepListening.current = false;
+      setListening(false);
+      setError(NO_SPEECH_MESSAGE);
+      console.warn('[TaskGrid voice] Recognition stopped because no speech was detected');
+      ExpoSpeechRecognitionModule.abort();
+    }, SPEECH_ACTIVITY_TIMEOUT_MS);
+  }
+
   function startRecognitionSegment() {
     clearRecognitionRestart();
     if (!keepListening.current || !visibleRef.current) return;
 
+    segmentHeardSpeech.current = false;
     segmentBaseTranscript.current = committedTranscript.current.trim();
     try {
       ExpoSpeechRecognitionModule.start({
@@ -132,6 +174,7 @@ export function VoiceTaskAssistant({
         contextualStrings: ['TaskGrid', ...skills.slice(0, 20).map((skill) => skill.name)],
       });
     } catch (cause) {
+      clearRecognitionWatchdog();
       keepListening.current = false;
       setListening(false);
       console.warn('[TaskGrid voice] Could not start speech recognition', cause);
@@ -187,6 +230,7 @@ export function VoiceTaskAssistant({
     if (!visible) {
       keepListening.current = false;
       clearRecognitionRestart();
+      clearRecognitionWatchdog();
     }
   }, [visible]);
 
@@ -194,6 +238,7 @@ export function VoiceTaskAssistant({
     () => () => {
       keepListening.current = false;
       clearRecognitionRestart();
+      clearRecognitionWatchdog();
       ExpoSpeechRecognitionModule.abort();
     },
     [],
@@ -224,6 +269,7 @@ export function VoiceTaskAssistant({
     if (listening) {
       keepListening.current = false;
       clearRecognitionRestart();
+      clearRecognitionWatchdog();
       ExpoSpeechRecognitionModule.stop();
       return;
     }
@@ -258,6 +304,7 @@ export function VoiceTaskAssistant({
     }
     keepListening.current = false;
     clearRecognitionRestart();
+    clearRecognitionWatchdog();
     ExpoSpeechRecognitionModule.stop();
     setLoading(true);
     setError('');
@@ -846,6 +893,9 @@ function mergeTranscript(base: string, incoming: string) {
 }
 
 function speechRecognitionMessage(error: string) {
+  if (error === 'no-speech' || error === 'speech-timeout') {
+    return NO_SPEECH_MESSAGE;
+  }
   if (error === 'network' || error === 'network-timeout') {
     return 'Speech recognition needs a connection right now. Check your internet and try again.';
   }
@@ -855,8 +905,11 @@ function speechRecognitionMessage(error: string) {
   if (error === 'service-not-allowed' || error === 'not-allowed') {
     return 'Voice input is blocked on this phone. Allow microphone and speech access, then try again.';
   }
-  if (error === 'audio-capture') {
-    return 'The microphone is being used by another app. Close it and try again.';
+  if (error === 'audio-capture' || error === 'busy' || error === 'interrupted') {
+    return 'Another app is using the microphone. Leave or end the call or meeting, then try again. Muting it may not release the microphone.';
+  }
+  if (error === 'client') {
+    return 'Your phone speech service could not start. Close other apps using the microphone, then try again.';
   }
   return 'We could not transcribe that. You can try again or type your task instead.';
 }
